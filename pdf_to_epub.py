@@ -99,7 +99,10 @@ def main():
     parser.add_argument('--context-out', default='context_warnings.txt', help='Файл с предупреждениями контекстной проверки')
     parser.add_argument('--context-pronouns', default='он,она,оно,они,мы,вы,ты', help='Местоимения для контекстной проверки')
     
-    # Этап 8: Генерация EPUB (опционально)
+    # Этап 8: Пост-очистка (опционально)
+    parser.add_argument('--post-clean', action='store_true', help='Пост-очистка: склейка букв через пробел, исправление разорванных слов, латиница→кириллица')
+    
+    # Этап 9: Генерация EPUB (опционально)
     parser.add_argument('--epub-template', nargs='?', const='sample.epub', help='Путь к шаблону EPUB (по умолчанию: sample.epub). Если указан, генерирует EPUB')
     parser.add_argument('--cover-colors', default='', help='Пять HEX-цветов через запятую (полоска, верхний блок, заголовок, градиент начало, градиент конец)')
     parser.add_argument('--epub-max-chapter-size', type=int, default=50, help='Максимальный размер главы/секции в KB (по умолчанию: 50)')
@@ -282,6 +285,30 @@ def main():
             if not run_cmd(context_cmd, f"Этап 7: Контекстная проверка"):
                 return 1
     
+    # Этап 8: Пост-очистка (опционально)
+    if args.post_clean:
+        print(f"  {step_num}. Пост-очистка")
+        step_num += 1
+        
+        # Используем final_clean.txt если есть, иначе final.txt
+        post_clean_input = outdir / "final_clean.txt"
+        if not post_clean_input.exists():
+            post_clean_input = outdir / "final.txt"
+        
+        if not post_clean_input.exists():
+            print(f"⚠️  Предупреждение: {post_clean_input.name} не найден — пост-очистка пропущена")
+        else:
+            post_clean_cmd = [
+                sys.executable,
+                str(here / "post_cleanup.py"),
+                "--in", str(post_clean_input),
+                "--out", str(outdir / "final_better.txt"),
+                "--html", str(outdir / "final_better.html"),
+                "--title", args.title + " (Post-clean)"
+            ]
+            if not run_cmd(post_clean_cmd, f"Этап 8: Пост-очистка"):
+                return 1
+    
     # Natasha проверки (параллельно, после LanguageTool)
     if args.natasha_check:
         natasha_input = outdir / "final_clean.txt"
@@ -309,17 +336,19 @@ def main():
             ]
             run_cmd(natasha_sync_cmd, "Natasha синхронизация именованных сущностей")
     
-    # Этап 8: Генерация EPUB (опционально)
+    # Этап 9: Генерация EPUB (опционально)
     if args.epub_template:
         print(f"  {step_num}. Генерация EPUB")
         
         # Определяем лучший источник для EPUB (по приоритету из схемы)
         # Приоритет: TXT (чистый обработанный текст) > JSON (структурированные данные) > HTML (может содержать лишнюю разметку)
         epub_sources = [
-            outdir / "final_clean.txt",  # Приоритет: обработанный текст выше JSON
+            outdir / "final_better.txt",  # После post-clean (если был)
+            outdir / "final_clean.txt",  # После LanguageTool
             outdir / "final.txt",
             outdir / "structured_rules.json",
             outdir / "structured.json",
+            outdir / "final_better.html",  # После post-clean (если был)
             outdir / "final_clean.html",
         ]
         

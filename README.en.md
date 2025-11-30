@@ -80,6 +80,7 @@ Spell checking (recommended):
 - `--context-check` — context checking (pronoun+verb, split words)
 - `--context-out FILE` — warnings file (default: context_warnings.txt)
 - `--context-pronouns LIST` — pronouns for checking (default: он,она,оно,они,мы,вы,ты)
+- `--post-clean` — post-cleanup: join spaced letters, fix split words, Latin→Cyrillic conversion
 
 Local spell checking (not recommended):
 - `--local-spell` — local checking via pyspellchecker/jamspell/symspell (⚠️ reduces quality to 52.4%)
@@ -107,7 +108,6 @@ Extended testing of 63 tool combinations with detailed metrics (OCR error types,
 - 📊 **Base Option:** modernization only (73.90% accuracy, ~1 sec)
 
 **Not Recommended:**
-- ❌ `--post-clean` — reduces accuracy (77.27% vs 79.42%)
 - ❌ `--local-spell` with pyspellchecker — significantly reduces quality (down to 52.4%)
 
 Output files (in out/)
@@ -117,4 +117,5 @@ Output files (in out/)
 - `final.html` / `final.txt` — modern spelling/typography
 - `flags.json` — flagged ambiguous replacements
 - `final_clean.txt` / `final_clean.html` — after LanguageTool (if `--lt-cloud`)
+- `final_better.txt` / `final_better.html` — after post-cleanup (if `--post-clean`)
 - `Book_Title.epub` — EPUB file with automatically generated cover (if `--epub-template`)
