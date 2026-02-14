@@ -60,10 +60,13 @@ def page_blocks_with_roles(page, two_columns=False):
             "chars": total_chars,
         })
     # Determine heading threshold per page
+    # Используем более строгий порог для определения заголовков
     if blocks:
         sizes_sorted = sorted(b["wsize"] for b in blocks)
         med = sizes_sorted[len(sizes_sorted)//2]
-        thr = med * 1.35 + 0.5
+        # Увеличиваем порог для более точного определения заголовков
+        # Заголовки должны быть заметно больше обычного текста
+        thr = med * 1.5 + 1.0  # Было: med * 1.35 + 0.5
     else:
         thr = 0
 
@@ -76,11 +79,20 @@ def page_blocks_with_roles(page, two_columns=False):
         wide = (x1 - x0) > pw * 0.45
         short = b["line_count"] <= 3 and b["chars"] <= 200
         big_font = b["wsize"] >= thr
+        
+        # Улучшенная логика определения заголовков
         is_heading = False
+        
+        # Основной критерий: большой шрифт и короткий текст
         if big_font and short:
             is_heading = True
-        elif centered and short and not wide:
+        # Дополнительно: центрированный короткий текст (даже если шрифт не намного больше)
+        elif centered and short and not wide and b["wsize"] >= med * 1.2:
             is_heading = True
+        # Если текст очень короткий (1-2 слова) и шрифт больше медианы - тоже заголовок
+        elif b["chars"] <= 50 and b["line_count"] == 1 and b["wsize"] >= med * 1.3:
+            is_heading = True
+        
         b["role"] = "heading" if is_heading else "paragraph"
     
     # Sort by reading order
@@ -102,7 +114,7 @@ def page_blocks_with_roles(page, two_columns=False):
         blocks = left_blocks + right_blocks
     else:
         # Default: sort by reading order (top, then left)
-    blocks.sort(key=lambda x: (x["bbox"][1], x["bbox"][0]))
+        blocks.sort(key=lambda x: (x["bbox"][1], x["bbox"][0]))
     return blocks
 
 
@@ -140,17 +152,33 @@ def main():
 
     doc = fitz.open(pdf_path)
     all_blocks = []
+    headings_found = []
     for i in range(len(doc)):
         page = doc.load_page(i)
         p_blocks = page_blocks_with_roles(page, two_columns=args.two_columns)
         for b in p_blocks:
-            all_blocks.append({
+            block_data = {
                 "page": i + 1,
                 "role": b["role"],
                 "text": b["text"],
                 "wsize": b["wsize"],
                 "bbox": b["bbox"],
-            })
+            }
+            all_blocks.append(block_data)
+            
+            # Сохраняем информацию о заголовках для отладки
+            if b["role"] == "heading":
+                headings_found.append({
+                    "page": i + 1,
+                    "text": b["text"][:50] + ("..." if len(b["text"]) > 50 else ""),
+                    "wsize": round(b["wsize"], 1)
+                })
+    
+    # Выводим информацию о найденных заголовках
+    if getattr(args, 'debug_headings', False):
+        print(f"\nНайдено заголовков: {len(headings_found)}")
+        for h in headings_found:
+            print(f"  Страница {h['page']}: \"{h['text']}\" (размер шрифта: {h['wsize']})")
 
     # Save JSON
     struct = {"file": pdf_path.name, "blocks": all_blocks}

@@ -68,28 +68,123 @@ def parse_cover_colors_arg(value: str, expected_count: int = 5) -> list[str]:
     return parts[:expected_count]
 
 
+def is_page_number(text: str) -> bool:
+    """Проверить, является ли текст номером страницы.
+    
+    Номера страниц обычно:
+    - Только цифры (1-999 обычно)
+    - Короткие (до 3-4 цифр)
+    - Могут быть с пробелами, но очень короткие
+    - НЕ являются заголовками глав (которые могут быть "I", "II", "1", "2" и т.д.)
+    
+    Возвращает True, если это номер страницы (нужно удалить).
+    """
+    if not text:
+        return False
+    
+    stripped = text.strip()
+    
+    # Только цифры - вероятно номер страницы
+    if stripped.isdigit():
+        # Номера страниц обычно небольшие (до 999)
+        # Но заголовки глав тоже могут быть цифрами, поэтому проверяем контекст
+        # Если это очень короткая строка (1-3 символа) и только цифры - вероятно номер страницы
+        if len(stripped) <= 3:
+            return True
+        # Если это 4+ цифры, но меньше 1000 - тоже может быть номер страницы
+        if len(stripped) <= 4 and int(stripped) < 1000:
+            return True
+    
+    # Цифры с пробелами, но очень короткие (до 5 символов всего)
+    if len(stripped) <= 5 and stripped.replace(' ', '').isdigit():
+        return True
+    
+    return False
+
+
 def load_blocks_from_json(json_path: Path):
-    """Загрузить блоки из JSON файла (structured.json или structured_rules.json)"""
+    """Загрузить блоки из JSON файла (structured.json или structured_rules.json)
+    
+    Автоматически фильтрует номера страниц (маленькие числа внизу страницы).
+    """
     data = json.loads(json_path.read_text(encoding="utf-8"))
-    return data.get("blocks", [])
+    blocks = data.get("blocks", [])
+    
+    # Фильтруем номера страниц
+    filtered_blocks = []
+    for block in blocks:
+        text = block.get("text", "").strip()
+        if not text:
+            continue
+        # Пропускаем номера страниц (маленькие числа внизу страницы - не метки глав!)
+        if is_page_number(text):
+            continue
+        filtered_blocks.append(block)
+    
+    return filtered_blocks
 
 
 def looks_like_section_heading(line: str) -> bool:
-    """Проверить, начинается ли строка с признака заголовка (Часть/Глава/Раздел/Книга, римское число, ***)."""
+    """Проверить, начинается ли строка с признака заголовка.
+    
+    Распознает:
+    - Ключевые слова: Часть, Глава, Раздел, Книга
+    - Римские цифры: I, II, III, IV, V, VI, VII, VIII, IX, X и т.д.
+    - Арабские цифры: 1, 2, 3 и т.д.
+    - Большие буквы: A, B, C и т.д.
+    - Разделители: ***
+    """
     if not line:
         return False
     stripped = line.strip()
     if not stripped:
         return False
 
-    keyword_pattern = re.compile(r'^(?:Часть|Глава|Раздел|Книга)\b.*\d', re.IGNORECASE)
+    # Ключевые слова с цифрами: "Часть 1", "Глава II" и т.д.
+    keyword_pattern = re.compile(r'^(?:Часть|Глава|Раздел|Книга)\s*[IVXLCDM\d]+', re.IGNORECASE)
     if keyword_pattern.match(stripped):
         return True
 
-    if re.match(r'^[IVXLCDM]+\b', stripped, re.IGNORECASE):
+    # Римские цифры в начале строки: "I.", "II", "III. Название" и т.д.
+    # Поддерживаем основные римские цифры: I, V, X, L, C, D, M
+    roman_pattern = re.compile(r'^[IVXLCDM]+[\.\)\s]', re.IGNORECASE)
+    if roman_pattern.match(stripped):
+        return True
+    
+    # Только римские цифры (если строка короткая, вероятно заголовок)
+    if len(stripped) <= 10 and re.match(r'^[IVXLCDM]+$', stripped, re.IGNORECASE):
         return True
 
+    # Арабские цифры в начале строки: "1.", "2", "3. Название" и т.д.
+    arabic_pattern = re.compile(r'^\d+[\.\)\s]', re.IGNORECASE)
+    if arabic_pattern.match(stripped):
+        return True
+    
+    # Только арабские цифры (если строка короткая, вероятно заголовок)
+    if len(stripped) <= 10 and re.match(r'^\d+$', stripped):
+        return True
+
+    # Большие буквы в начале строки: "A.", "B", "C. Название" и т.д.
+    # Проверяем, что это одна буква или буква с точкой/скобкой
+    letter_pattern = re.compile(r'^[А-ЯЁA-Z][\.\)\s]', re.IGNORECASE)
+    if letter_pattern.match(stripped):
+        # Убеждаемся, что это не начало обычного предложения
+        # Если после буквы идет точка и пробел, а затем заглавная буква - вероятно заголовок
+        if re.match(r'^[А-ЯЁA-Z]\.\s+[А-ЯЁA-Z]', stripped, re.IGNORECASE):
+            return True
+        # Если это просто одна буква с точкой или скобкой - заголовок
+        if re.match(r'^[А-ЯЁA-Z][\.\)]\s*$', stripped, re.IGNORECASE):
+            return True
+    
+    # Только одна большая буква (если строка очень короткая)
+    if len(stripped) <= 3 and re.match(r'^[А-ЯЁA-Z]$', stripped):
+        return True
+
+    # Разделители: ***, --- и т.д.
     if re.match(r'^\*\s*\*\s*\*', stripped):
+        return True
+    
+    if re.match(r'^[-=]{3,}', stripped):
         return True
 
     return False
@@ -108,15 +203,33 @@ def paragraphs_to_blocks(paragraphs):
             continue
 
         first_line = lines[0]
-        is_heading = (
-            (len(first_line) < 100 and
-             (
-                 first_line.isupper() or
-                 (len(lines) == 1 and len(first_line) < 50)
-             ) and
-             not first_line.endswith(('.', ',', ';', ':', '!', '?')))
-            or looks_like_section_heading(first_line)
-        )
+        
+        # Улучшенная логика определения заголовков
+        is_heading = False
+        
+        # Проверка на стандартные признаки заголовка раздела
+        if looks_like_section_heading(first_line):
+            is_heading = True
+        # Короткая строка (до 100 символов), все заглавные или очень короткая (до 50 символов)
+        elif len(first_line) < 100:
+            if first_line.isupper() and not first_line.endswith(('.', ',', ';', ':', '!', '?')):
+                is_heading = True
+            elif len(lines) == 1 and len(first_line) < 50 and not first_line.endswith(('.', ',', ';', ':', '!', '?')):
+                # Одна строка, короткая, без знаков препинания в конце
+                is_heading = True
+            elif len(first_line) <= 30 and not first_line.endswith(('.', ',', ';', ':', '!', '?')):
+                # Очень короткая строка без знаков препинания - вероятно заголовок
+                is_heading = True
+            # Дополнительная проверка: паттерны с римскими цифрами, арабскими цифрами, буквами
+            elif re.match(r'^[IVXLCDM]+\s+[А-ЯЁA-Z]', first_line, re.IGNORECASE):
+                # Римская цифра + текст
+                is_heading = True
+            elif re.match(r'^\d+\s+[А-ЯЁA-Z]', first_line):
+                # Арабская цифра + текст
+                is_heading = True
+            elif re.match(r'^[А-ЯЁA-Z]\.\s+[А-ЯЁA-Z]', first_line, re.IGNORECASE):
+                # Буква с точкой + текст
+                is_heading = True
 
         para_text = ' '.join(lines).strip()
         para_text = re.sub(r'\s+', ' ', para_text)
@@ -130,7 +243,10 @@ def paragraphs_to_blocks(paragraphs):
 
 
 def load_blocks_from_html(html_path: Path):
-    """Загрузить блоки из HTML файла (парсит h2, p и pre теги)"""
+    """Загрузить блоки из HTML файла (парсит h2, p и pre теги)
+    
+    Автоматически фильтрует номера страниц (маленькие числа внизу страницы).
+    """
     html = html_path.read_text(encoding="utf-8")
     blocks = []
     
@@ -163,7 +279,8 @@ def load_blocks_from_html(html_path: Path):
                 text = re.sub(r'<[^>]+>', '', text)
                 text = text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
                 text = re.sub(r'\s+', ' ', text).strip()
-                if text:
+                # Пропускаем номера страниц (маленькие числа внизу страницы - не метки глав!)
+                if text and not is_page_number(text):
                     blocks.append({"role": "heading", "text": text})
                 pos += h2_match.end()
             elif p_match:
@@ -172,7 +289,8 @@ def load_blocks_from_html(html_path: Path):
                 text = re.sub(r'<[^>]+>', '', text)
                 text = text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
                 text = re.sub(r'\s+', ' ', text).strip()
-                if text:
+                # Пропускаем номера страниц (маленькие числа внизу страницы - не метки глав!)
+                if text and not is_page_number(text):
                     blocks.append({"role": "paragraph", "text": text})
                 pos += p_match.end()
             else:
@@ -182,56 +300,129 @@ def load_blocks_from_html(html_path: Path):
 
 
 def load_blocks_from_text(text: str):
-    """Загрузить блоки из plain text файла (final_clean.txt или final.txt)"""
-    paragraphs = re.split(r'\n\s*\n', text)
+    """Загрузить блоки из plain text файла (final_clean.txt или final.txt)
+    
+    Автоматически фильтрует номера страниц (маленькие числа внизу страницы).
+    """
+    # Убираем пробелы в начале и конце
+    text = text.strip()
+    if not text:
+        return []
+    
+    # Сначала пробуем разбить по двойным переносам строк (абзацы)
+    paragraphs = re.split(r'\n\s*\n+', text)
+    
+    # Если абзацев мало или нет, пробуем разбить по одинарным переносам
+    # но только если текст действительно большой
     if len(paragraphs) <= 1 and '\n' in text:
-        paragraphs = text.splitlines()
-    return paragraphs_to_blocks(paragraphs)
+        # Разбиваем по одинарным переносам, но объединяем короткие строки
+        lines = text.splitlines()
+        paragraphs = []
+        current_para = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                if current_para:
+                    paragraphs.append('\n'.join(current_para))
+                    current_para = []
+            else:
+                current_para.append(line)
+        # Добавляем последний абзац
+        if current_para:
+            paragraphs.append('\n'.join(current_para))
+    
+    blocks = paragraphs_to_blocks(paragraphs)
+    # Фильтруем пустые блоки и номера страниц
+    filtered_blocks = []
+    for b in blocks:
+        block_text = b.get("text", "").strip()
+        if not block_text:
+            continue
+        # Пропускаем номера страниц (маленькие числа внизу страницы - не метки глав!)
+        if is_page_number(block_text):
+            continue
+        filtered_blocks.append(b)
+    
+    return filtered_blocks
+
+
+def split_into_sections_by_size(blocks, max_size_kb=50):
+    """Простое разделение блоков на секции по размеру (без поиска заголовков)"""
+    sections = []
+    current_blocks = []
+    current_size = 0
+    section_index = 1
+    max_size = max_size_kb * 1024
+
+    total_blocks = len(blocks)
+    processed_count = 0
+
+    for block in blocks:
+        text = block.get("text", "").strip()
+        # Пропускаем только полностью пустые блоки (БЕЗ фильтрации номеров страниц)
+        if not text:
+            continue
+        
+        block_size = len(text.encode("utf-8"))
+
+        # Если текущая секция слишком большая - создаем новую
+        if current_blocks and current_size + block_size > max_size:
+            if current_blocks:
+                sections.append({"title": f"Часть {section_index}", "blocks": current_blocks})
+                section_index += 1
+                current_blocks = []
+                current_size = 0
+
+        # Добавляем блок в текущую секцию
+        current_blocks.append(block)
+        current_size += block_size
+        processed_count += 1
+
+    # Сохраняем последнюю секцию (ВАЖНО: не забываем!)
+    if current_blocks:
+        sections.append({"title": f"Часть {section_index}", "blocks": current_blocks})
+
+    # Отладочная информация
+    total_blocks_in_sections = sum(len(s["blocks"]) for s in sections)
+    if total_blocks != total_blocks_in_sections:
+        print(f"⚠️  Предупреждение: обработано {total_blocks_in_sections} блоков из {total_blocks}")
+
+    return sections
 
 
 def split_into_chapters(blocks, max_size_kb=50):
-    """Разбить блоки по главах (заголовки) и по размеру, если заголовков нет."""
+    """Разбить блоки на главы просто по размеру (без поиска заголовков)"""
     chapters = []
     current_blocks = []
-    current_title = None
     current_size = 0
     chapter_index = 1
     max_size = max_size_kb * 1024
 
-    def flush():
-        nonlocal current_blocks, current_title, current_size, chapter_index
-        if not current_blocks:
-            return
-        title = current_title or f"Глава {chapter_index}"
-        chapters.append({"title": title, "blocks": current_blocks})
-        chapter_index += 1
-        current_blocks = []
-        current_title = None
-        current_size = 0
-
+    # Просто делим все блоки на части по размеру
     for block in blocks:
         text = block.get("text", "").strip()
-        block_size = len(text.encode("utf-8"))
-        role = block.get("role")
-
-        if role == "heading":
-            if current_blocks:
-                flush()
-            current_title = text or f"Глава {chapter_index}"
-            current_blocks.append(block)
-            current_size = block_size
+        # Пропускаем только действительно пустые блоки
+        if not text:
             continue
+        
+        block_size = len(text.encode("utf-8"))
 
+        # Если текущая глава слишком большая - создаем новую
         if current_blocks and current_size + block_size > max_size:
-            flush()
+            if current_blocks:
+                chapters.append({"title": f"Часть {chapter_index}", "blocks": current_blocks})
+                chapter_index += 1
+                current_blocks = []
+                current_size = 0
 
-        if not current_blocks:
-            current_title = f"Глава {chapter_index}"
-
+        # Добавляем блок в текущую главу
         current_blocks.append(block)
         current_size += block_size
 
-    flush()
+    # Сохраняем последнюю главу
+    if current_blocks:
+        chapters.append({"title": f"Часть {chapter_index}", "blocks": current_blocks})
+    
     return chapters
 
 
@@ -263,17 +454,101 @@ def generate_cover_image(
         sat = rand.uniform(0.35, 0.8)
         val = rand.uniform(0.4, 0.95)
         return tuple(int(c * 255) for c in colorsys.hsv_to_rgb(hue, sat, val))
+    
+    def brightness(rgb):
+        """Вычисляет яркость цвета (0-255)"""
+        return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+    
+    def relative_luminance(rgb):
+        """Вычисляет относительную яркость по WCAG (0-1)"""
+        def linearize(c):
+            c = c / 255.0
+            return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        r, g, b = rgb
+        return 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b)
+    
+    def contrast_ratio(color1, color2):
+        """Вычисляет коэффициент контрастности по WCAG (1-21)"""
+        l1 = relative_luminance(color1)
+        l2 = relative_luminance(color2)
+        lighter = max(l1, l2)
+        darker = min(l1, l2)
+        return (lighter + 0.05) / (darker + 0.05)
+    
+    def rgb_to_hsv(rgb):
+        """Преобразует RGB в HSV"""
+        r, g, b = [c / 255.0 for c in rgb]
+        return colorsys.rgb_to_hsv(r, g, b)
+    
+    def hsv_to_rgb(hsv):
+        """Преобразует HSV в RGB"""
+        h, s, v = hsv
+        rgb = colorsys.hsv_to_rgb(h, s, v)
+        return tuple(int(c * 255) for c in rgb)
+    
+    def complementary_color(rgb):
+        """Возвращает противоположный цвет на цветовом круге"""
+        h, s, v = rgb_to_hsv(rgb)
+        # Противоположный цвет: поворот на 180 градусов (0.5 в нормализованном виде)
+        comp_h = (h + 0.5) % 1.0
+        # Сохраняем насыщенность и яркость, но инвертируем яркость для лучшего контраста
+        comp_v = 1.0 - v if v > 0.5 else 1.0
+        comp_s = min(1.0, s * 1.2)  # Немного увеличиваем насыщенность
+        return hsv_to_rgb((comp_h, comp_s, comp_v))
+    
+    def ensure_contrast(text_color, bg_color, min_contrast=4.5):
+        """
+        Обеспечивает минимальный контраст между текстом и фоном.
+        Возвращает цвет текста с достаточным контрастом.
+        """
+        current_contrast = contrast_ratio(text_color, bg_color)
+        
+        if current_contrast >= min_contrast:
+            return text_color
+        
+        # Если контраст недостаточен, корректируем цвет
+        bg_brightness = brightness(bg_color)
+        
+        # Если фон светлый, делаем текст темнее
+        if bg_brightness > 128:
+            # Темный текст на светлом фоне
+            factor = 0.3  # Делаем очень темным
+            new_color = tuple(int(c * factor) for c in text_color)
+        else:
+            # Светлый текст на темном фоне
+            factor = 1.5  # Делаем светлее
+            new_color = tuple(min(255, int(c * factor)) for c in text_color)
+        
+        # Проверяем контраст снова
+        new_contrast = contrast_ratio(new_color, bg_color)
+        
+        # Если все еще недостаточно, используем максимальный контраст
+        if new_contrast < min_contrast:
+            if bg_brightness > 128:
+                new_color = (0, 0, 0)  # Черный на светлом
+            else:
+                new_color = (255, 255, 255)  # Белый на темном
+        
+        return new_color
 
     custom_rgb = _coerce_cover_colors(cover_colors)
     if custom_rgb:
         stripe_color, top_block_color, title_color_hint, art_start_color, art_end_color = custom_rgb
+        # Используем указанный цвет, но проверяем контраст
         title_color = title_color_hint
+        # Если контраст недостаточен, используем противоположный цвет
+        if contrast_ratio(title_color, top_block_color) < 4.5:
+            title_color = complementary_color(top_block_color)
+            title_color = ensure_contrast(title_color, top_block_color, min_contrast=4.5)
     else:
         art_start_color = random_color()
         art_end_color = random_color()
         top_block_color = random_color()
         stripe_color = darken(random_color())
-        title_color = None
+        # Используем противоположный цвет на цветовом круге для заголовка
+        title_color = complementary_color(top_block_color)
+        # Обеспечиваем достаточный контраст
+        title_color = ensure_contrast(title_color, top_block_color, min_contrast=4.5)
 
     def draw_gradient(target: Image.Image, start_color, end_color, orientation: str):
         tw, th = target.size
@@ -298,10 +573,8 @@ def generate_cover_image(
                 )
                 target.putpixel((x, y), color)
 
-    def brightness(rgb):
-        return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
-
     def contrast_text_color(bg_color, palette_color):
+        """Старая функция для обратной совместимости"""
         if brightness(bg_color) > 180:
             return tuple(max(0, palette_color[i] - 110) for i in range(3))
         return tuple(min(255, palette_color[i] + 110) for i in range(3))
@@ -396,9 +669,18 @@ def generate_cover_image(
 
     if title_color:
         title_fill = title_color
+        # Финальная проверка контраста
+        title_fill = ensure_contrast(title_fill, top_block_color, min_contrast=4.5)
     else:
-        title_fill = contrast_text_color(top_block_color, art_end_color)
-    author_fill = (0, 0, 0) if brightness(top_block_color) > 190 else (255, 255, 255)
+        # Если цвет не задан, используем противоположный цвет
+        title_fill = complementary_color(top_block_color)
+        title_fill = ensure_contrast(title_fill, top_block_color, min_contrast=4.5)
+    
+    # Цвет автора: максимальный контраст с фоном
+    author_fill = ensure_contrast((255, 255, 255), top_block_color, min_contrast=4.5)
+    # Если белый не дает достаточного контраста, используем черный
+    if contrast_ratio(author_fill, top_block_color) < 4.5:
+        author_fill = ensure_contrast((0, 0, 0), top_block_color, min_contrast=4.5)
 
     max_title_width = width - 160
     title_lines = []
@@ -455,14 +737,28 @@ def generate_cover_image(
 
 
 def create_xhtml_section(blocks, title, css_href="../Styles/Style0001.css"):
-    """Создать XHTML файл для раздела"""
+    """Создать XHTML файл для раздела - БЕЗ фильтрации, добавляем все блоки"""
     body_parts = []
+    blocks_added = 0
+    blocks_skipped = 0
+    
     for block in blocks:
-        text = hesc(block.get("text", ""))
+        text = block.get("text", "").strip()
+        # Пропускаем только полностью пустые блоки
+        if not text:
+            blocks_skipped += 1
+            continue
+        
+        text_escaped = hesc(text)
         if block.get("role") == "heading":
-            body_parts.append(f"<h2>{text}</h2>")
+            body_parts.append(f"<h2>{text_escaped}</h2>")
         else:
-            body_parts.append(f"<p>{text}</p>")
+            body_parts.append(f"<p>{text_escaped}</p>")
+        blocks_added += 1
+    
+    # Отладочная информация
+    if blocks_skipped > 0 or blocks_added != len(blocks):
+        print(f"   create_xhtml_section '{title[:30]}...': добавлено {blocks_added} блоков, пропущено {blocks_skipped} из {len(blocks)}")
     
     xhtml = f'''<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
@@ -543,12 +839,20 @@ def update_content_opf(opf_content: str, section_files: list, title: str, author
             modified_elem = meta
     
     if modified_elem is not None:
-        modified_elem.set('content', datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))
+        # Используем timezone-aware datetime вместо устаревшего utcnow()
+        from datetime import timezone
+        # В EPUB 3 атрибут content должен быть текстовым содержимым, а не атрибутом
+        modified_elem.text = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        # Удаляем атрибут content, если он был установлен неправильно
+        if 'content' in modified_elem.attrib:
+            del modified_elem.attrib['content']
     
-    # Обновляем identifier (генерируем новый UUID)
+    # Обновляем identifier (генерируем новый UUID и возвращаем его для использования в NCX)
+    book_uuid = None
     identifier = root.find(f'.//{{{dc_ns}}}identifier[@id="BookId"]')
     if identifier is not None:
-        identifier.text = f'urn:uuid:{uuid.uuid4()}'
+        book_uuid = str(uuid.uuid4())
+        identifier.text = f'urn:uuid:{book_uuid}'
     
     # Обновляем обложку в manifest, если создана новая
     if has_cover:
@@ -574,15 +878,17 @@ def update_content_opf(opf_content: str, section_files: list, title: str, author
     if manifest is None or spine is None:
         return opf_content  # Не удалось найти, возвращаем как есть
     
-    # Удаляем старые Section файлы из manifest и spine
+    # Удаляем старые Section и Chapter файлы из manifest и spine
     for item in list(manifest):
         href = item.get('href', '')
-        if href.startswith('Text/Chapter') and href.endswith('.xhtml'):
+        # Удаляем как старые Section*.xhtml, так и старые Chapter*.xhtml
+        if (href.startswith('Text/Section') or href.startswith('Text/Chapter')) and href.endswith('.xhtml'):
             manifest.remove(item)
     
     for itemref in list(spine):
         idref = itemref.get('idref', '')
-        if idref.startswith('Chapter'):
+        # Удаляем как старые Section, так и старые Chapter
+        if idref.startswith('Section') or idref.startswith('Chapter'):
             spine.remove(itemref)
     
     # Находим позицию для вставки разделов (после последнего не-Section элемента)
@@ -594,9 +900,13 @@ def update_content_opf(opf_content: str, section_files: list, title: str, author
             break
     
     # Добавляем новые разделы в manifest и spine (в правильном порядке)
-        for i, section_file in enumerate(section_files, 1):
-            section_id = f"Chapter{i:04d}.xhtml"
-            item_id = f"Chapter{i:04d}"
+    added_to_manifest = 0
+    added_to_spine = 0
+    
+    for i, section_file in enumerate(section_files, 1):
+        # section_file уже содержит имя файла типа "Chapter0001.xhtml"
+        section_id = section_file  # Используем имя файла как есть
+        item_id = f"Chapter{i:04d}"
         href = f"Text/{section_id}"
         
         # Добавляем в manifest
@@ -604,11 +914,17 @@ def update_content_opf(opf_content: str, section_files: list, title: str, author
         item.set('id', item_id)
         item.set('href', href)
         item.set('media-type', 'application/xhtml+xml')
+        added_to_manifest += 1
         
         # Добавляем в spine в правильном порядке (последовательно)
         itemref = ET.Element(f'{{{opf_ns}}}itemref')
         itemref.set('idref', item_id)
         spine.insert(insert_pos + i - 1, itemref)
+        added_to_spine += 1
+    
+    # Отладочная информация
+    print(f"   Добавлено в manifest: {added_to_manifest} глав")
+    print(f"   Добавлено в spine: {added_to_spine} глав")
     
     # Обновляем guide для обложки
     if has_cover:
@@ -633,11 +949,10 @@ def update_content_opf(opf_content: str, section_files: list, title: str, author
     ET.register_namespace('dc', dc_ns)
     ET.register_namespace('dcterms', dcterms_ns)
     
-    # Преобразуем обратно в строку
     xml_str = ET.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
     # Исправляем форматирование для соответствия оригиналу
     xml_str = xml_str.replace(' />', '/>')
-    return xml_str
+    return xml_str, book_uuid
 
 
 def generate_epub(
@@ -648,12 +963,37 @@ def generate_epub(
     author: str = "",
     cover_colors: list[str] | None = None,
     max_chapter_size_kb: int = 50,
+    use_chapter_heads: bool = False,
 ):
-    """Генерировать EPUB на основе шаблона и блоков текста"""
+    """Генерировать EPUB на основе шаблона и блоков текста
+    
+    Args:
+        use_chapter_heads: Если True, использует поиск заголовков для разделения на главы.
+                          Если False, просто разбивает по размеру на секции.
+    """
     
     # Разбиваем на разделы
-    sections = split_into_chapters(blocks, max_size_kb=max_chapter_size_kb)
-    print(f"Разбито на {len(sections)} глав (макс. {max_chapter_size_kb} KB)")
+    print(f"\n📖 Разбиение на части:")
+    print(f"   Входных блоков: {len(blocks)}")
+    
+    if use_chapter_heads:
+        sections = split_into_chapters(blocks, max_size_kb=max_chapter_size_kb)
+        total_blocks_in_sections = sum(len(s["blocks"]) for s in sections)
+        print(f"   Разбито на {len(sections)} глав по заголовкам (макс. {max_chapter_size_kb} KB)")
+        print(f"   Блоков в главах: {total_blocks_in_sections} из {len(blocks)}")
+        if total_blocks_in_sections != len(blocks):
+            lost = len(blocks) - total_blocks_in_sections
+            print(f"   ⚠️  ВНИМАНИЕ: потеряно {lost} блоков ({lost*100/len(blocks):.1f}%) при разбиении!")
+    else:
+        sections = split_into_sections_by_size(blocks, max_size_kb=max_chapter_size_kb)
+        total_blocks_in_sections = sum(len(s["blocks"]) for s in sections)
+        print(f"   Разбито на {len(sections)} частей по размеру (макс. {max_chapter_size_kb} KB)")
+        print(f"   Блоков в частях: {total_blocks_in_sections} из {len(blocks)}")
+        if total_blocks_in_sections != len(blocks):
+            lost = len(blocks) - total_blocks_in_sections
+            print(f"   ⚠️  ВНИМАНИЕ: потеряно {lost} блоков ({lost*100/len(blocks):.1f}%) при разбиении!")
+        else:
+            print(f"   ✓ Все блоки попали в части!")
     
     # Создаем временную директорию
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -712,9 +1052,11 @@ def generate_epub(
         else:
             print("Предупреждение: Pillow не установлен, обложка не будет создана")
         
-        # Удаляем старые Section файлы
+        # Удаляем старые Section и Chapter файлы
         for old_section in text_path.glob("Section*.xhtml"):
             old_section.unlink()
+        for old_chapter in text_path.glob("Chapter*.xhtml"):
+            old_chapter.unlink()
         
         # Читаем content.opf
         opf_path = oebps_path / "content.opf"
@@ -722,14 +1064,66 @@ def generate_epub(
         
         # Генерируем новые разделы
         section_files = []
+        total_blocks_before_filter = sum(len(ch.get("blocks", [])) for ch in sections)
+        total_filtered_blocks = 0
+        
         for i, chapter in enumerate(sections, 1):
             section_blocks = chapter.get("blocks", [])
+            original_count = len(section_blocks)
+            
+            # НЕ фильтруем блоки - добавляем все как есть (только пустые пропускаем)
+            filtered_blocks = []
+            for block in section_blocks:
+                text = block.get("text", "").strip()
+                if text:  # Добавляем все непустые блоки без фильтрации
+                    filtered_blocks.append(block)
+            
+            total_filtered_blocks += len(filtered_blocks)
+            
+            # Пропускаем только полностью пустые главы
+            if not filtered_blocks:
+                print(f"⚠️  Пропущена пустая глава {i}: {chapter.get('title', 'Без названия')}")
+                continue
+            
             section_id = f"Chapter{i:04d}.xhtml"
             section_title = chapter.get("title") or title
-            xhtml_content = create_xhtml_section(section_blocks, section_title)
+            
+            # Проверяем размер XHTML перед записью
+            xhtml_content = create_xhtml_section(filtered_blocks, section_title)
+            xhtml_size = len(xhtml_content.encode("utf-8"))
+            
             section_file = text_path / section_id
             section_file.write_text(xhtml_content, encoding="utf-8")
             section_files.append(section_id)
+            
+            # Отладочная информация для каждой главы
+            if i <= 5 or i == len(sections) or (i % 10 == 0):
+                first_block_text = filtered_blocks[0].get("text", "")[:50] if filtered_blocks else ""
+                last_block_text = filtered_blocks[-1].get("text", "")[:50] if filtered_blocks else ""
+                print(f"   Глава {i}/{len(sections)} '{section_title[:30]}...': {len(filtered_blocks)} блоков, XHTML: {xhtml_size/1024:.1f} KB")
+                if i <= 3:
+                    print(f"      Первый блок: {repr(first_block_text)}")
+                    print(f"      Последний блок: {repr(last_block_text)}")
+        
+        # Итоговая отладочная информация
+        print(f"\n📊 Статистика генерации EPUB:")
+        print(f"   Всего секций: {len(sections)}")
+        print(f"   Блоков в секциях: {total_filtered_blocks} из {total_blocks_before_filter}")
+        if total_blocks_before_filter != total_filtered_blocks:
+            lost = total_blocks_before_filter - total_filtered_blocks
+            print(f"   ⚠️  ВНИМАНИЕ: потеряно {lost} блоков ({lost*100/total_blocks_before_filter:.1f}%)!")
+        else:
+            print(f"   ✓ Все блоки сохранены!")
+        print(f"   Создано XHTML файлов: {len(section_files)}")
+        
+        # Проверяем размеры всех XHTML файлов
+        total_xhtml_size = 0
+        for section_file in section_files:
+            file_path = text_path / section_file
+            if file_path.exists():
+                file_size = file_path.stat().st_size
+                total_xhtml_size += file_size
+        print(f"   Общий размер всех XHTML файлов: {total_xhtml_size/1024:.1f} KB")
         
         # Обновляем титульную страницу
         titul_path = text_path / "Titul.xhtml"
@@ -757,40 +1151,226 @@ def generate_epub(
                 if doc_title_text is not None:
                     doc_title_text.text = title
             
+            # Обновляем идентификатор NCX, чтобы он совпадал с OPF
+            # Сначала получим UUID из OPF (будет передан позже)
+            # Пока просто найдем элемент head и обновим его позже
+            
             # Обновляем navMap - удаляем старые разделы и добавляем новые
             nav_map = toc_root.find('.//ncx:navMap', ncx_ns_map)
             if nav_map is not None:
-                # Удаляем старые navPoint для Section
+                # Удаляем ВСЕ старые navPoint (и Section, и Chapter)
+                # Сохраняем только корневой navPoint для Titul, если он есть
+                titul_nav_point = None
                 for nav_point in list(nav_map):
                     content = nav_point.find('ncx:content', ncx_ns_map)
                     if content is not None:
                         src = content.get('src', '')
-                        if 'Chapter' in src:
+                        # Сохраняем ссылку на Titul, если она есть
+                        if 'Titul.xhtml' in src:
+                            # Удаляем все вложенные navPoint (Section, Chapter и т.д.)
+                            # Используем findall с рекурсивным поиском, но исключаем сам nav_point
+                            nested_points = nav_point.findall('.//ncx:navPoint', ncx_ns_map)
+                            # Удаляем в обратном порядке, чтобы не нарушить структуру при итерации
+                            for nested_point in reversed(nested_points):
+                                # Пропускаем сам nav_point (корневой Titul)
+                                if nested_point != nav_point:
+                                    # Удаляем через родителя
+                                    parent = nested_point.getparent()
+                                    if parent is not None:
+                                        parent.remove(nested_point)
+                            titul_nav_point = nav_point
+                        elif 'Section' in src or 'Chapter' in src:
+                            # Удаляем старые Section и Chapter на верхнем уровне
                             nav_map.remove(nav_point)
                 
-                # Добавляем новые navPoint для разделов
-                for i, (section_file, chapter) in enumerate(zip(section_files, sections), 1):
-                    section_id = f"Chapter{i:04d}.xhtml"
-                    section_title = chapter.get("title", title)
-                    
-                    nav_point = ET.SubElement(nav_map, f'{{{ncx_ns}}}navPoint')
-                    nav_point.set('id', f'navPoint{i+1}')
-                    nav_point.set('playOrder', str(i+1))
-                    
-                    nav_label = ET.SubElement(nav_point, f'{{{ncx_ns}}}navLabel')
-                    nav_label_text = ET.SubElement(nav_label, f'{{{ncx_ns}}}text')
-                    nav_label_text.text = section_title
-                    
-                    nav_content = ET.SubElement(nav_point, f'{{{ncx_ns}}}content')
-                    nav_content.set('src', f'Text/{section_id}')
+                # Если есть Titul navPoint, добавляем главы внутрь него
+                # Иначе создаем отдельные navPoint для каждой главы
+                if titul_nav_point is not None:
+                    # Добавляем главы внутрь Titul navPoint
+                    # playOrder начинаем с 2, потому что navPoint1 это Titul
+                    start_order = 2
+                    for i, (section_file, chapter) in enumerate(zip(section_files, sections), 1):
+                        section_id = f"Chapter{i:04d}.xhtml"
+                        section_title = chapter.get("title", title)
+                        
+                        nav_point = ET.SubElement(titul_nav_point, f'{{{ncx_ns}}}navPoint')
+                        nav_point.set('id', f'navPoint{i+start_order}')
+                        nav_point.set('playOrder', str(i+1))
+                        
+                        nav_label = ET.SubElement(nav_point, f'{{{ncx_ns}}}navLabel')
+                        nav_label_text = ET.SubElement(nav_label, f'{{{ncx_ns}}}text')
+                        nav_label_text.text = section_title
+                        
+                        nav_content = ET.SubElement(nav_point, f'{{{ncx_ns}}}content')
+                        nav_content.set('src', f'Text/{section_id}')
+                else:
+                    # Добавляем главы как отдельные navPoint на верхнем уровне
+                    for i, (section_file, chapter) in enumerate(zip(section_files, sections), 1):
+                        section_id = f"Chapter{i:04d}.xhtml"
+                        section_title = chapter.get("title", title)
+                        
+                        nav_point = ET.SubElement(nav_map, f'{{{ncx_ns}}}navPoint')
+                        nav_point.set('id', f'navPoint{i+1}')
+                        nav_point.set('playOrder', str(i+1))
+                        
+                        nav_label = ET.SubElement(nav_point, f'{{{ncx_ns}}}navLabel')
+                        nav_label_text = ET.SubElement(nav_label, f'{{{ncx_ns}}}text')
+                        nav_label_text.text = section_title
+                        
+                        nav_content = ET.SubElement(nav_point, f'{{{ncx_ns}}}content')
+                        nav_content.set('src', f'Text/{section_id}')
             
             ET.register_namespace('', ncx_ns)
             toc_xml = ET.tostring(toc_root, encoding='utf-8', xml_declaration=True).decode('utf-8')
             toc_path.write_text(toc_xml, encoding="utf-8")
         
+        # Обновляем nav.xhtml (EPUB 3 навигация) используя XML парсер для сохранения структуры
+        nav_xhtml_path = text_path / "nav.xhtml"
+        if nav_xhtml_path.exists():
+            try:
+                # Парсим XML для безопасного обновления
+                nav_tree = ET.parse(nav_xhtml_path)
+                nav_root = nav_tree.getroot()
+                
+                # Обновляем заголовок
+                title_elem = nav_root.find('.//{http://www.w3.org/1999/xhtml}title')
+                if title_elem is not None:
+                    title_elem.text = title
+                
+                # Находим nav с epub:type="toc"
+                xhtml_ns = 'http://www.w3.org/1999/xhtml'
+                epub_ns = 'http://www.idpf.org/2007/ops'
+                
+                # Ищем nav элемент с epub:type="toc"
+                toc_nav = None
+                for nav in nav_root.findall('.//{http://www.w3.org/1999/xhtml}nav'):
+                    if nav.get(f'{{{epub_ns}}}type') == 'toc' or nav.get('epub:type') == 'toc':
+                        toc_nav = nav
+                        break
+                
+                if toc_nav is not None:
+                    # Находим <ol> внутри nav
+                    ol_elem = toc_nav.find('.//{http://www.w3.org/1999/xhtml}ol')
+                    if ol_elem is not None:
+                        # Удаляем старые ссылки на Section и Chapter
+                        for li in list(ol_elem):
+                            # Проверяем все ссылки внутри <li>
+                            links = li.findall('.//{http://www.w3.org/1999/xhtml}a')
+                            should_remove = False
+                            for link in links:
+                                href = link.get('href', '')
+                                if 'Section' in href or 'Chapter' in href:
+                                    should_remove = True
+                                    break
+                            
+                            # Если это Titul с вложенным списком, удаляем только вложенный список
+                            titul_link = li.find('.//{http://www.w3.org/1999/xhtml}a[@href="Titul.xhtml"]')
+                            if titul_link is not None:
+                                # Удаляем вложенный <ol> внутри этого <li>
+                                nested_ol = li.find('.//{http://www.w3.org/1999/xhtml}ol')
+                                if nested_ol is not None:
+                                    li.remove(nested_ol)
+                            elif should_remove:
+                                # Удаляем весь <li> если он содержит Section или Chapter
+                                ol_elem.remove(li)
+                        
+                        # Находим <li> с Titul (если есть) для добавления глав внутрь
+                        titul_li = None
+                        for li in ol_elem:
+                            titul_link = li.find('.//{http://www.w3.org/1999/xhtml}a[@href="Titul.xhtml"]')
+                            if titul_link is not None:
+                                titul_li = li
+                                break
+                        
+                        # Создаем новые ссылки на главы
+                        if titul_li is not None:
+                            # Добавляем вложенный <ol> внутрь Titul <li>
+                            nested_ol = ET.SubElement(titul_li, f'{{{xhtml_ns}}}ol')
+                            for i, (section_file, chapter) in enumerate(zip(section_files, sections), 1):
+                                section_id = f"Chapter{i:04d}.xhtml"
+                                section_title = chapter.get("title", title)
+                                
+                                li = ET.SubElement(nested_ol, f'{{{xhtml_ns}}}li')
+                                a = ET.SubElement(li, f'{{{xhtml_ns}}}a')
+                                a.set('href', section_id)
+                                a.text = section_title
+                        else:
+                            # Добавляем главы как отдельные <li> на верхнем уровне
+                            for i, (section_file, chapter) in enumerate(zip(section_files, sections), 1):
+                                section_id = f"Chapter{i:04d}.xhtml"
+                                section_title = chapter.get("title", title)
+                                
+                                li = ET.SubElement(ol_elem, f'{{{xhtml_ns}}}li')
+                                a = ET.SubElement(li, f'{{{xhtml_ns}}}a')
+                                a.set('href', section_id)
+                                a.text = section_title
+                        
+                        # Сохраняем обновленный файл
+                        ET.register_namespace('', xhtml_ns)
+                        ET.register_namespace('epub', epub_ns)
+                        nav_tree.write(nav_xhtml_path, encoding='utf-8', xml_declaration=True)
+                        print(f"   Обновлен nav.xhtml: добавлено {len(section_files)} ссылок на главы")
+            except Exception as e:
+                print(f"⚠️  Предупреждение: не удалось обновить nav.xhtml через XML парсер: {e}")
+                print(f"   Используется fallback метод через регулярные выражения")
+                # Fallback на старый метод через регулярные выражения
+                nav_content = nav_xhtml_path.read_text(encoding="utf-8")
+                nav_content = re.sub(
+                    r'<title>.*?</title>',
+                    f'<title>{hesc(title)}</title>',
+                    nav_content,
+                    flags=re.DOTALL
+                )
+                # Простое удаление старых ссылок и добавление новых
+                nav_content = re.sub(
+                    r'<ol>.*?</ol>',
+                    lambda m: f'<ol>\n' + '\n'.join([f'      <li><a href="Chapter{i:04d}.xhtml">{hesc(sections[i-1].get("title", title))}</a></li>' for i in range(1, len(section_files)+1)]) + '\n    </ol>',
+                    nav_content,
+                    count=1,
+                    flags=re.DOTALL | re.IGNORECASE
+                )
+                nav_xhtml_path.write_text(nav_content, encoding="utf-8")
+        
         # Обновляем content.opf (с обложкой, если создана)
-        updated_opf = update_content_opf(opf_content, section_files, title, author, has_cover_image, sections)
+        updated_opf, book_uuid = update_content_opf(opf_content, section_files, title, author, has_cover_image, sections)
         opf_path.write_text(updated_opf, encoding="utf-8")
+        
+        # Обновляем идентификатор в NCX, чтобы он совпадал с OPF
+        if toc_path.exists() and book_uuid:
+            toc_content = toc_path.read_text(encoding="utf-8")
+            toc_root = ET.fromstring(toc_content)
+            ncx_ns = 'http://www.daisy.org/z3986/2005/ncx/'
+            ncx_ns_map = {'ncx': ncx_ns}
+            
+            # Обновляем идентификатор в head
+            head_elem = toc_root.find('.//ncx:head', ncx_ns_map)
+            if head_elem is not None:
+                # Ищем или создаем meta с name="dtb:uid"
+                uid_meta = None
+                for meta in head_elem.findall('ncx:meta', ncx_ns_map):
+                    if meta.get('name') == 'dtb:uid':
+                        uid_meta = meta
+                        break
+                
+                if uid_meta is None:
+                    uid_meta = ET.SubElement(head_elem, f'{{{ncx_ns}}}meta')
+                    uid_meta.set('name', 'dtb:uid')
+                
+                uid_meta.set('content', f'urn:uuid:{book_uuid}')
+            
+            ET.register_namespace('', ncx_ns)
+            toc_xml = ET.tostring(toc_root, encoding='utf-8', xml_declaration=True).decode('utf-8')
+            toc_path.write_text(toc_xml, encoding="utf-8")
+        
+        # Проверяем, что все Chapter файлы существуют перед сборкой EPUB
+        missing_files = []
+        for section_file in section_files:
+            file_path = text_path / section_file
+            if not file_path.exists():
+                missing_files.append(section_file)
+        
+        if missing_files:
+            print(f"⚠️  ВНИМАНИЕ: не найдены файлы глав: {missing_files}")
         
         # Собираем новый EPUB
         with zipfile.ZipFile(output_epub, 'w', zipfile.ZIP_DEFLATED) as z:
@@ -800,11 +1380,18 @@ def generate_epub(
                 z.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
             
             # Остальные файлы
+            files_added = 0
+            chapter_files_added = 0
             for file_path in tmp_path.rglob("*"):
                 if file_path.is_file():
                     rel_path = file_path.relative_to(tmp_path)
                     if rel_path.name != "mimetype":  # mimetype уже добавлен
                         z.write(file_path, rel_path)
+                        files_added += 1
+                        if "Chapter" in rel_path.name:
+                            chapter_files_added += 1
+            
+            print(f"   Добавлено в EPUB: {files_added} файлов, из них {chapter_files_added} глав")
         
         print(f"EPUB создан: {output_epub}")
 
@@ -823,7 +1410,8 @@ def main():
         default="",
         help="Пять HEX-цветов (полоска; верхний блок; заголовок; нижний градиент начало; конец)",
     )
-    ap.add_argument("--max-chapter-size", type=int, default=50, help="Максимальный размер главы в KB (по умолчанию 50)")
+    ap.add_argument("--max-chapter-size", type=int, default=50, help="Максимальный размер главы/секции в KB (по умолчанию 50)")
+    ap.add_argument("--use-chapter-heads", action="store_true", help="Использовать поиск заголовков для разделения на главы (по умолчанию: простое разделение по размеру)")
     args = ap.parse_args()
     
     template_epub = Path(args.template)
@@ -856,7 +1444,35 @@ def main():
         print("Ошибка: не найдено блоков текста")
         return 1
     
-    print(f"Загружено {len(blocks)} блоков")
+    # Проверяем, сколько блоков имеют текст
+    blocks_with_text = [b for b in blocks if b.get("text", "").strip()]
+    print(f"Загружено {len(blocks)} блоков, из них {len(blocks_with_text)} с текстом")
+    
+    if len(blocks_with_text) == 0:
+        print("⚠️  Предупреждение: все блоки пустые!")
+        # Показываем первые несколько блоков для отладки
+        print("Первые 5 блоков:")
+        for i, b in enumerate(blocks[:5]):
+            print(f"  Блок {i}: role={b.get('role')}, text={repr(b.get('text', '')[:50])}")
+        return 1
+    
+    # Фильтруем пустые блоки
+    blocks = blocks_with_text
+    print(f"Используется {len(blocks)} блоков с текстом")
+    
+    # Показываем статистику по блокам для отладки
+    total_text_length = sum(len(b.get("text", "").encode("utf-8")) for b in blocks)
+    print(f"Общий размер текста: {total_text_length / 1024:.1f} KB")
+    
+    # Показываем первые и последние блоки для проверки
+    if len(blocks) > 0:
+        print(f"Первый блок: {repr(blocks[0].get('text', '')[:100])}")
+        print(f"Последний блок: {repr(blocks[-1].get('text', '')[:100])}")
+    
+    # Подсчитываем блоки по типам
+    heading_count = sum(1 for b in blocks if b.get("role") == "heading")
+    paragraph_count = sum(1 for b in blocks if b.get("role") == "paragraph")
+    print(f"Блоков-заголовков: {heading_count}, блоков-абзацев: {paragraph_count}")
     
     cover_colors = None
     if args.cover_colors:
@@ -874,6 +1490,7 @@ def main():
         args.author,
         cover_colors=cover_colors,
         max_chapter_size_kb=args.max_chapter_size,
+        use_chapter_heads=args.use_chapter_heads,
     )
     
     return 0

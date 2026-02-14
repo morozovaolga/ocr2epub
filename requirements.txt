@@ -1,4 +1,12 @@
 PyMuPDF==1.24.11
 Pillow>=10.0.0
 natasha>=0.17.0
+stanza~=1.8.1
+pymorphy2>=0.9.0
+python-dotenv>=1.0.0
 
+# LLM-коррекция через GigaChat (Сбер):
+gigachat>=0.2.0
+
+# Зависимости для парсинга словаря:
+openpyxl>=3.1.0

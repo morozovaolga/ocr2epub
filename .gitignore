@@ -15,6 +15,7 @@ Thumbs.db
 out/
 output/
 output_vol2/
+old/
 
 # PDF files
 *.pdf

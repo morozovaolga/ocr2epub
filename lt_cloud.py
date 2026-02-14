@@ -167,15 +167,17 @@ def to_html(text: str, title: str) -> str:
 
 
 def main():
-    ap = argparse.ArgumentParser(description='Apply safe LanguageTool (cloud) fixes without extra deps.')
+    ap = argparse.ArgumentParser(description='Apply safe LanguageTool (cloud) + Yandex.Speller fixes.')
     ap.add_argument('--in', dest='inp', required=True, help='Входной TXT')
     ap.add_argument('--outdir', default='out', help='Папка вывода')
     ap.add_argument('--title', default='Документ (LT)', help='Заголовок HTML')
     ap.add_argument('--sleep', type=float, default=0.5, help='Пауза между запросами (сек)')
     ap.add_argument('--timeout', type=int, default=60, help='Таймаут HTTP (сек)')
     ap.add_argument('--chunk-size', type=int, default=6000, help='Максимум символов для одного запроса')
-    ap.add_argument('--with-yandex', action='store_true', help='После LanguageTool применить Yandex.Speller')
-    ap.add_argument('--yandex-lang', default='ru', help='Язык для Yandex.Speller (по умолчанию ru)')
+    ap.add_argument('--yandex-speller', action='store_true',
+                    help='Дополнительно использовать Yandex.Speller (бесплатно, без ключа)')
+    ap.add_argument('--no-lt', action='store_true',
+                    help='Не использовать LanguageTool (только Yandex.Speller)')
     args = ap.parse_args()
 
     inp = Path(args.inp)
@@ -183,9 +185,13 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
 
     text = inp.read_text(encoding='utf-8', errors='replace')
-    checkers = [LanguageToolChecker(lang='ru-RU', timeout=args.timeout)]
-    if args.with_yandex:
-        checkers.append(YandexSpellerChecker(lang=args.yandex_lang, timeout=args.timeout))
+    checkers = []
+    if not args.no_lt:
+        checkers.append(LanguageToolChecker(lang='ru-RU', timeout=args.timeout))
+    if args.yandex_speller:
+        checkers.append(YandexSpellerChecker(lang='ru', timeout=args.timeout))
+    if not checkers:
+        checkers.append(LanguageToolChecker(lang='ru-RU', timeout=args.timeout))
 
     fixed_text, stats = run_spell_pipeline(
         text,
@@ -197,7 +203,7 @@ def main():
     (outdir / 'final_clean.html').write_text(to_html(fixed_text, args.title), encoding='utf-8')
     total_safe = sum(stats.values())
     detail = ", ".join(f"{name}: {count}" for name, count in stats.items())
-    print(f'Applied safe fixes: {total_safe} ({detail}). Saved final_clean.txt/html in {outdir}')
+    print(f'Применено исправлений: {total_safe} ({detail}). Сохранено final_clean.txt/html в {outdir}')
 
 
 if __name__ == '__main__':

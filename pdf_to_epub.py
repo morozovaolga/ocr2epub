@@ -10,14 +10,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Устанавливаем UTF-8 кодировку для консоли (Windows)
+# Принудительно UTF-8 на Windows
 if sys.platform == 'win32':
+    os.environ['PYTHONUTF8'] = '1'
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
     try:
         if hasattr(sys.stdout, 'reconfigure'):
             sys.stdout.reconfigure(encoding='utf-8')
         if hasattr(sys.stderr, 'reconfigure'):
             sys.stderr.reconfigure(encoding='utf-8')
-        os.environ['PYTHONIOENCODING'] = 'utf-8'
     except Exception:
         pass
 
@@ -44,23 +45,20 @@ def main():
         epilog="""
 Примеры использования:
 
-1. Базовый вариант (LanguageTool + Post-cleanup + EPUB):
-   python pdf_to_epub.py --pdf book.pdf --title "Название" --author "Автор"
-
-2. С локальной проверкой орфографии:
+1. Базовый вариант (только EPUB без LLM):
    python pdf_to_epub.py --pdf book.pdf --title "Название" --author "Автор" \\
-     --local-spell --local-spell-type pyspellchecker
-
-3. Максимальная проверка качества:
-   python pdf_to_epub.py --pdf book.pdf --title "Название" --author "Автор" \\
-     --local-spell --local-spell-type pyspellchecker \\
-     --lt-cloud \\
-     --context-check \\
      --epub-template sample.epub
 
-4. С кастомными цветами обложки:
+2. С LLM-коррекцией через GigaChat (рекомендуется):
    python pdf_to_epub.py --pdf book.pdf --title "Название" --author "Автор" \\
-     --cover-colors "#ffbe0b,#fb5607,#ff006e,#8338ec,#3a86ff"
+     --llm-correct --llm-chunk-size 6000 \\
+     --post-clean --epub-template sample.epub
+
+3. Полный пайплайн (LanguageTool + GigaChat + пост-очистка):
+   python pdf_to_epub.py --pdf book.pdf --title "Название" --author "Автор" \\
+     --lt-cloud --yandex-speller \\
+     --llm-correct --llm-chunk-size 6000 \\
+     --post-clean --epub-template sample.epub
         """
     )
     
@@ -69,6 +67,7 @@ def main():
     parser.add_argument('--outdir', default='out', help='Папка для результатов (по умолчанию: out)')
     parser.add_argument('--title', required=True, help='Название книги')
     parser.add_argument('--author', default='', help='Автор книги')
+    parser.add_argument('--html', action='store_true', help='Генерировать промежуточные HTML-файлы для ручной проверки в браузере')
     
     # Этап 1: Извлечение структуры (обязательно)
     parser.add_argument('--two-columns', action='store_true', help='PDF с двумя колонками на странице')
@@ -82,17 +81,17 @@ def main():
     
     # Этап 4: Модернизация (всегда выполняется)
     
-    # Этап 5: Локальная проверка орфографии (опционально)
-    parser.add_argument('--local-spell', action='store_true', help='Применить локальную проверку орфографии')
-    parser.add_argument('--local-spell-type', default='pyspellchecker', 
-                       choices=['pyspellchecker', 'jamspell', 'symspell', 'auto'],
-                       help='Тип локального проверщика (по умолчанию: pyspellchecker)')
-    parser.add_argument('--local-spell-model', default='', help='Путь к модели (jamspell) или словарю (symspell)')
-    parser.add_argument('--local-spell-lang', default='ru', help='Язык для локальной проверки')
-    
-    # Этап 6: LanguageTool (опционально)
+    # Этап 5: LanguageTool + YandexSpeller (опционально)
     parser.add_argument('--lt-cloud', action='store_true', help='Использовать LanguageTool (облачная проверка)')
+    parser.add_argument('--yandex-speller', action='store_true', help='Дополнительно использовать Yandex.Speller (бесплатно)')
     parser.add_argument('--chunk-size', type=int, default=6000, help='Размер чанка для LanguageTool (по умолчанию: 6000)')
+    
+    # Этап 6: LLM-коррекция через GigaChat (опционально, самый мощный инструмент)
+    parser.add_argument('--llm-correct', action='store_true', help='Коррекция текста через GigaChat')
+    parser.add_argument('--llm-model', default='', help='Модель GigaChat (по умолчанию: GigaChat)')
+    parser.add_argument('--llm-api-key', default='', help='GIGACHAT_CREDENTIALS (или через env)')
+    parser.add_argument('--llm-chunk-size', type=int, default=3000, help='Размер чанка для LLM (по умолчанию: 3000)')
+    parser.add_argument('--llm-corrections', default='', help='Файл коррекций для обучения LLM (по умолчанию: llm_corrections.json)')
     
     # Этап 7: Контекстная проверка (опционально)
     parser.add_argument('--context-check', action='store_true', help='Контекстная проверка (местоимение+глагол)')
@@ -139,7 +138,7 @@ def main():
     
     step_num = 1
     
-    # Этап 1: Извлечение структуры (обязательно)
+    # Этап 1: Извлечение структуры из PDF (PyMuPDF)
     print(f"  {step_num}. Извлечение структуры из PDF")
     step_num += 1
     
@@ -209,46 +208,18 @@ def main():
     # Определяем входной файл для проверок орфографии
     spell_input = outdir / "final.txt"
     
-    # Этап 5: Локальная проверка орфографии (опционально)
-    if args.local_spell:
-        print(f"  {step_num}. Локальная проверка орфографии ({args.local_spell_type})")
+    # Этап 5: LanguageTool + YandexSpeller (опционально)
+    if args.lt_cloud or args.yandex_speller:
+        checkers_desc = []
+        if args.lt_cloud:
+            checkers_desc.append("LanguageTool")
+        if args.yandex_speller:
+            checkers_desc.append("Yandex.Speller")
+        print(f"  {step_num}. Проверка: {' + '.join(checkers_desc)}")
         step_num += 1
         
         if not spell_input.exists():
-            print(f"⚠️  Предупреждение: {spell_input.name} не найден — локальная проверка пропущена")
-        else:
-            local_spell_cmd = [
-                sys.executable,
-                str(here / "local_spell_checker.py"),
-                "--in", str(spell_input),
-                "--outdir", str(outdir),
-                "--title", args.title + " (Local Spell)",
-                "--checker-type", args.local_spell_type,
-                "--lang", args.local_spell_lang,
-            ]
-            if args.local_spell_model:
-                if args.local_spell_type == "jamspell":
-                    local_spell_cmd.extend(["--model-path", args.local_spell_model])
-                elif args.local_spell_type == "symspell":
-                    local_spell_cmd.extend(["--dictionary-path", args.local_spell_model])
-                elif args.local_spell_type == "auto":
-                    local_spell_cmd.extend(["--model-path", args.local_spell_model])
-            
-            if not run_cmd(local_spell_cmd, f"Этап 5: Локальная проверка орфографии"):
-                return 1
-            
-            # Обновляем входной файл для следующего этапа
-            local_spell_output = outdir / "final_local_spell.txt"
-            if local_spell_output.exists():
-                spell_input = local_spell_output
-    
-    # Этап 6: LanguageTool (опционально)
-    if args.lt_cloud:
-        print(f"  {step_num}. LanguageTool проверка")
-        step_num += 1
-        
-        if not spell_input.exists():
-            print(f"⚠️  Предупреждение: {spell_input.name} не найден — LanguageTool пропущен")
+            print(f"⚠️  Предупреждение: {spell_input.name} не найден — проверка пропущена")
         else:
             lt_cmd = [
                 sys.executable,
@@ -258,7 +229,11 @@ def main():
                 "--title", args.title + " (LT)",
                 "--chunk-size", str(args.chunk_size),
             ]
-            if not run_cmd(lt_cmd, f"Этап 6: LanguageTool проверка"):
+            if args.yandex_speller:
+                lt_cmd.append("--yandex-speller")
+            if not args.lt_cloud:
+                lt_cmd.append("--no-lt")
+            if not run_cmd(lt_cmd, f"Этап 5: {' + '.join(checkers_desc)}"):
                 return 1
             
             # Обновляем входной файл для следующего этапа
@@ -266,12 +241,43 @@ def main():
             if lt_output.exists():
                 spell_input = lt_output
     
+    # Этап 6: LLM-коррекция через GigaChat (опционально)
+    if args.llm_correct:
+        print(f"  {step_num}. LLM-коррекция (GigaChat)")
+        step_num += 1
+        
+        if not spell_input.exists():
+            print(f"⚠️  Предупреждение: {spell_input.name} не найден — LLM-коррекция пропущена")
+        else:
+            llm_cmd = [
+                sys.executable,
+                str(here / "llm_correction.py"),
+                "--in", str(spell_input),
+                "--outdir", str(outdir),
+                "--title", args.title + " (LLM)",
+                "--chunk-size", str(args.llm_chunk_size),
+            ]
+            if args.llm_model:
+                llm_cmd.extend(["--model", args.llm_model])
+            if args.llm_api_key:
+                llm_cmd.extend(["--api-key", args.llm_api_key])
+            if args.llm_corrections:
+                llm_cmd.extend(["--corrections", args.llm_corrections])
+            if not run_cmd(llm_cmd, f"Этап 6: LLM-коррекция (GigaChat)"):
+                return 1
+            
+            # Обновляем входной файл для следующего этапа
+            llm_output = outdir / "final_llm.txt"
+            if llm_output.exists():
+                spell_input = llm_output
+    
     # Этап 7: Контекстная проверка (опционально)
     if args.context_check:
         print(f"  {step_num}. Контекстная проверка")
         step_num += 1
         
-        context_input = outdir / "final_clean.txt"
+        # Используем лучший доступный файл
+        context_input = spell_input
         if not context_input.exists():
             print(f"⚠️  Предупреждение: {context_input.name} не найден — контекстная проверка пропущена")
         else:
@@ -290,10 +296,8 @@ def main():
         print(f"  {step_num}. Пост-очистка")
         step_num += 1
         
-        # Используем final_clean.txt если есть, иначе final.txt
-        post_clean_input = outdir / "final_clean.txt"
-        if not post_clean_input.exists():
-            post_clean_input = outdir / "final.txt"
+        # Используем лучший доступный файл
+        post_clean_input = spell_input
         
         if not post_clean_input.exists():
             print(f"⚠️  Предупреждение: {post_clean_input.name} не найден — пост-очистка пропущена")
@@ -306,33 +310,68 @@ def main():
                 "--html", str(outdir / "final_better.html"),
                 "--title", args.title + " (Post-clean)"
             ]
+            
             if not run_cmd(post_clean_cmd, f"Этап 8: Пост-очистка"):
                 return 1
     
-    # Natasha проверки (параллельно, после LanguageTool)
+    # Natasha проверки (параллельно, после всех коррекций)
     if args.natasha_check:
-        natasha_input = outdir / "final_clean.txt"
+        natasha_input = spell_input
         if natasha_input.exists():
+            # Убеждаемся, что путь к выходному файлу не содержит дублирования outdir
+            natasha_out_path = Path(args.natasha_out)
+            # Если путь уже содержит outdir в начале, убираем его
+            natasha_out_str = str(natasha_out_path)
+            outdir_str = str(outdir)
+            if natasha_out_str.startswith(outdir_str):
+                # Убираем префикс outdir и ведущие слеши
+                relative_path = natasha_out_str[len(outdir_str):].lstrip('\\/')
+                natasha_out = outdir / relative_path if relative_path else outdir / natasha_out_path.name
+            elif natasha_out_path.is_absolute():
+                natasha_out = natasha_out_path
+            else:
+                natasha_out = outdir / natasha_out_path
+            
+            # Создаем директорию для выходного файла, если её нет
+            natasha_out.parent.mkdir(parents=True, exist_ok=True)
+            
             natasha_cmd = [
                 sys.executable,
                 str(here / "natasha_entity_check.py"),
                 "--pdf", str(pdf_path),
                 "--clean", str(natasha_input),
-                "--out", str(outdir / args.natasha_out),
+                "--out", str(natasha_out),
                 "--types", args.natasha_types
             ]
             run_cmd(natasha_cmd, "Natasha проверка именованных сущностей")
     
     if args.natasha_sync:
-        natasha_input = outdir / "final_clean.txt"
+        natasha_input = spell_input
         if natasha_input.exists():
+            # Убеждаемся, что путь к отчету не содержит дублирования outdir
+            natasha_report_path = Path(args.natasha_sync_report)
+            # Если путь уже содержит outdir в начале, убираем его
+            natasha_report_str = str(natasha_report_path)
+            outdir_str = str(outdir)
+            if natasha_report_str.startswith(outdir_str):
+                # Убираем префикс outdir и ведущие слеши
+                relative_path = natasha_report_str[len(outdir_str):].lstrip('\\/')
+                natasha_report = outdir / relative_path if relative_path else outdir / natasha_report_path.name
+            elif natasha_report_path.is_absolute():
+                natasha_report = natasha_report_path
+            else:
+                natasha_report = outdir / natasha_report_path
+            
+            # Создаем директорию для отчета, если её нет
+            natasha_report.parent.mkdir(parents=True, exist_ok=True)
+            
             natasha_sync_cmd = [
                 sys.executable,
                 str(here / "natasha_sync.py"),
                 "--pdf", str(pdf_path),
                 "--clean", str(natasha_input),
                 "--types", args.natasha_types,
-                "--report", str(outdir / args.natasha_sync_report)
+                "--report", str(natasha_report)
             ]
             run_cmd(natasha_sync_cmd, "Natasha синхронизация именованных сущностей")
     
@@ -344,7 +383,8 @@ def main():
         # Приоритет: TXT (чистый обработанный текст) > JSON (структурированные данные) > HTML (может содержать лишнюю разметку)
         epub_sources = [
             outdir / "final_better.txt",  # После post-clean (если был)
-            outdir / "final_clean.txt",  # После LanguageTool
+            outdir / "final_llm.txt",     # После LLM-коррекции (если была)
+            outdir / "final_clean.txt",   # После LanguageTool/YandexSpeller
             outdir / "final.txt",
             outdir / "structured_rules.json",
             outdir / "structured.json",
@@ -485,14 +525,24 @@ def main():
                     print(f"  📚 {output_epub}")
                     print("=" * 80)
     
+    # Удаляем промежуточные HTML если --html не указан
+    if not args.html:
+        html_files = list(outdir.glob("*.html"))
+        if html_files:
+            for hf in html_files:
+                hf.unlink(missing_ok=True)
+    
     print("\n" + "=" * 80)
     print("✅ ОБРАБОТКА ЗАВЕРШЕНА")
     print("=" * 80)
     print(f"Результаты в папке: {outdir}")
     
     # Показываем созданные файлы
+    show_patterns = ["*.txt", "*.json", "*.epub"]
+    if args.html:
+        show_patterns.insert(1, "*.html")
     print("\nСозданные файлы:")
-    for pattern in ["*.txt", "*.html", "*.json", "*.epub"]:
+    for pattern in show_patterns:
         files = list(outdir.glob(pattern))
         if files:
             print(f"\n{pattern}:")
