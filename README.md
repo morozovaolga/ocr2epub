@@ -7,7 +7,7 @@
 ## Требования
 
 - Python 3.10+
-- API-ключ GigaChat (бесплатно, 3 млн токенов): [developers.sber.ru/studio](https://developers.sber.ru/studio/)
+- API-ключ GigaChat: [developers.sber.ru/studio](https://developers.sber.ru/studio/)
 
 ## Установка
 
@@ -195,7 +195,7 @@ python preprocess_pdf.py --pdf scan.pdf --out scan_clean.pdf --steps deskew,cont
 
 ## Стоимость
 
-GigaChat Lite (Сбер) — **бесплатно**, 3 млн токенов. Хватает на несколько книг по 200+ страниц.
+GigaChat Lite (Сбер) — 3 млн токенов. Хватает на несколько книг по 200+ страниц.
 
 Ключ получаете на [developers.sber.ru/studio](https://developers.sber.ru/studio/), регистрация через Сбер ID.
 
