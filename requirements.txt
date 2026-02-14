@@ -1,5 +1,6 @@
 PyMuPDF==1.24.11
 Pillow>=10.0.0
+opencv-python>=4.8.0
 natasha>=0.17.0
 stanza~=1.8.1
 pymorphy2>=0.9.0

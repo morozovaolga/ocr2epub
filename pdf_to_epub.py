@@ -69,6 +69,14 @@ def main():
     parser.add_argument('--author', default='', help='Автор книги')
     parser.add_argument('--html', action='store_true', help='Генерировать промежуточные HTML-файлы для ручной проверки в браузере')
     
+    # Этап 0: Предобработка PDF (опционально, перед OCR)
+    parser.add_argument('--preprocess', action='store_true', help='Предобработка PDF: выравнивание, шумодав, контраст (перед OCR)')
+    parser.add_argument('--preprocess-preset', default='medium', choices=['light', 'medium', 'heavy', 'binarize'],
+                        help='Пресет предобработки (по умолчанию: medium)')
+    parser.add_argument('--preprocess-dpi', type=int, default=300, help='DPI рендеринга для предобработки (по умолчанию: 300)')
+    parser.add_argument('--preprocess-steps', default='', help='Шаги предобработки через запятую (переопределяет пресет)')
+    parser.add_argument('--preprocess-pages', default='', help='Страницы для предобработки: "1-10" или "1,3,5-7" (по умолчанию: все)')
+    
     # Этап 1: Извлечение структуры (обязательно)
     parser.add_argument('--two-columns', action='store_true', help='PDF с двумя колонками на странице')
     
@@ -137,6 +145,34 @@ def main():
     print("\nЭтапы обработки:")
     
     step_num = 1
+    
+    # Этап 0: Предобработка PDF (опционально)
+    if args.preprocess:
+        print(f"  0. Предобработка PDF (улучшение качества скана)")
+        
+        preprocess_output = outdir / f"{pdf_path.stem}_preprocessed.pdf"
+        preprocess_cmd = [
+            sys.executable,
+            str(here / "preprocess_pdf.py"),
+            "--pdf", str(pdf_path),
+            "--out", str(preprocess_output),
+            "--preset", args.preprocess_preset,
+            "--dpi", str(args.preprocess_dpi),
+        ]
+        if args.preprocess_steps:
+            preprocess_cmd.extend(["--steps", args.preprocess_steps])
+        if args.preprocess_pages:
+            preprocess_cmd.extend(["--pages", args.preprocess_pages])
+        
+        if not run_cmd(preprocess_cmd, "Этап 0: Предобработка PDF"):
+            return 1
+        
+        # Используем предобработанный PDF для дальнейших этапов
+        if preprocess_output.exists():
+            pdf_path = preprocess_output
+            print(f"  Используется предобработанный PDF: {pdf_path}")
+        else:
+            print(f"⚠️  Предупреждение: предобработанный PDF не создан, используем оригинал")
     
     # Этап 1: Извлечение структуры из PDF (PyMuPDF)
     print(f"  {step_num}. Извлечение структуры из PDF")

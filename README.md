@@ -92,6 +92,7 @@ python pdf_to_epub.py \
 
 | # | Этап | Скрипт | Описание |
 |---|------|--------|----------|
+| 0 | Предобработка PDF | `preprocess_pdf.py` | Выравнивание, шумодав, контраст, бинаризация (перед OCR) |
 | 1 | Извлечение структуры | `extract_structured_text.py` | PDF -> JSON с блоками текста (heading / paragraph) |
 | 2 | Старая орфография | `oldspelling.py` | Применение правил дореформенной орфографии |
 | 3 | Токенизация | `stanza_tokenizer.py` | Улучшение разбиения на предложения (опционально) |
@@ -121,6 +122,16 @@ python pdf_to_epub.py \
 | `--two-columns` | PDF с двумя колонками |
 | `--no-oldspelling` | Пропустить правила дореформенной орфографии |
 | `--html` | Генерировать промежуточные HTML-файлы для ручной проверки |
+
+### Предобработка PDF (перед OCR)
+
+| Флаг | Описание |
+|------|----------|
+| `--preprocess` | Включить предобработку PDF (выравнивание, шумодав, контраст) |
+| `--preprocess-preset PRESET` | Пресет: `light`, `medium` (по умолчанию), `heavy`, `binarize` |
+| `--preprocess-dpi N` | DPI рендеринга (по умолчанию: 300) |
+| `--preprocess-steps STEPS` | Шаги через запятую (переопределяет пресет) |
+| `--preprocess-pages PAGES` | Диапазон страниц: `1-10` или `1,3,5-7` |
 
 ### Проверка орфографии
 
@@ -163,6 +174,14 @@ python pdf_to_epub.py \
 | `--epub-max-chapter-size KB` | Макс. размер главы в KB (по умолчанию: 50) |
 | `--epub-use-chapter-heads` | Разделять главы по найденным заголовкам |
 | `--cover-colors COLORS` | Пять HEX-цветов для обложки через запятую |
+
+Также скрипт можно использовать отдельно (для подготовки PDF перед FineReader):
+
+```bash
+python preprocess_pdf.py --pdf scan.pdf --out scan_clean.pdf --preset medium
+python preprocess_pdf.py --pdf scan.pdf --out scan_clean.pdf --preset binarize --dpi 400
+python preprocess_pdf.py --pdf scan.pdf --out scan_clean.pdf --steps deskew,contrast,sharpen
+```
 
 ## Выходные файлы (папка `out/`)
 
@@ -223,10 +242,6 @@ python llm_learn.py --show
 2. **Словарь автозамен** — однословные пары применяются автоматически после LLM (точное совпадение по границам слов).
 
 Чем больше книг обработаете — тем точнее результат.
-
-## Тестирование
-
-Расширенное тестирование 63 комбинаций инструментов: [интерактивный дашборд](https://morozovaolga.github.io/ocr2epub/).
 
 ## Лицензия
 
