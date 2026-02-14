@@ -38,8 +38,6 @@ pip install -r requirements.txt
 GIGACHAT_CREDENTIALS=ваш-ключ-сюда
 ```
 
-Бесплатный тариф: **3 млн токенов** — хватит на несколько книг.
-
 ## Быстрый старт
 
 > Перед запуском удалите папку `out/` (или укажите другую через `--outdir`), чтобы старые файлы не мешали.
@@ -192,12 +190,6 @@ python preprocess_pdf.py --pdf scan.pdf --out scan_clean.pdf --steps deskew,cont
 | `final_llm.txt` | После LLM-коррекции (GigaChat) |
 | `final_better.txt` | После пост-очистки |
 | `Название_книги.epub` | Готовый EPUB с обложкой |
-
-## Стоимость
-
-GigaChat Lite (Сбер) — 3 млн токенов. Хватает на несколько книг по 200+ страниц.
-
-Ключ получаете на [developers.sber.ru/studio](https://developers.sber.ru/studio/), регистрация через Сбер ID.
 
 ## Лицензия
 
