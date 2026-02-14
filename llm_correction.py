@@ -3,14 +3,10 @@ LLM-коррекция текста: исправление OCR-ошибок ч�
 
 Текст разбивается на чанки по абзацам и отправляется на коррекцию.
 LLM исправляет OCR-ошибки, сохраняя стиль и содержание текста.
-
-Поддерживает обучение на основе ручных коррекций (few-shot + словарь автозамен).
 """
 
 import argparse
-import json
 import os
-import re
 import sys
 import time
 from pathlib import Path
@@ -59,82 +55,6 @@ SYSTEM_PROMPT = (
 GIGACHAT_ENV_KEY = "GIGACHAT_CREDENTIALS"
 GIGACHAT_DEFAULT_MODEL = "GigaChat"
 
-DEFAULT_CORRECTIONS_FILE = Path(__file__).parent / "llm_corrections.json"
-
-
-def load_corrections(path: Optional[Path] = None) -> list[dict]:
-    """Загрузить пары коррекций из JSON файла."""
-    p = path or DEFAULT_CORRECTIONS_FILE
-    if not p.exists():
-        return []
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return data.get("pairs", [])
-    except Exception:
-        return []
-
-
-def build_fewshot_prompt(pairs: list[dict], max_examples: int = 15) -> str:
-    """
-    Сформировать дополнение к системному промпту из пар коррекций.
-
-    Берёт до max_examples самых коротких пар (они наглядны и экономят токены).
-    """
-    if not pairs:
-        return ""
-
-    # Сортируем по длине — короткие примеры информативнее
-    usable = [p for p in pairs if p.get("wrong") and p.get("right")]
-    usable.sort(key=lambda p: len(p["wrong"]) + len(p["right"]))
-    selected = usable[:max_examples]
-
-    if not selected:
-        return ""
-
-    lines = ["\n\nИзвестные OCR-ошибки (исправляй их при встрече):"]
-    for p in selected:
-        lines.append(f"  «{p['wrong']}» → «{p['right']}»")
-
-    return "\n".join(lines)
-
-
-def build_dictionary(pairs: list[dict]) -> dict[str, str]:
-    """
-    Построить словарь автозамен из пар коррекций.
-
-    Включает только однословные замены (безопасно для автоматического применения).
-    """
-    d: dict[str, str] = {}
-    for p in pairs:
-        wrong = p.get("wrong", "").strip()
-        right = p.get("right", "").strip()
-        # Берём только однословные замены (без пробелов) — они безопасны
-        if wrong and right and " " not in wrong and " " not in right:
-            d[wrong] = right
-    return d
-
-
-def apply_dictionary(text: str, dictionary: dict[str, str]) -> tuple[str, int]:
-    """
-    Применить словарь автозамен к тексту.
-
-    Заменяет только целые слова (word boundary).
-    Возвращает (исправленный текст, количество замен).
-    """
-    if not dictionary:
-        return text, 0
-
-    count = 0
-    for wrong, right in dictionary.items():
-        # Экранируем спецсимволы regex
-        pattern = re.compile(r"\b" + re.escape(wrong) + r"\b")
-        new_text, n = pattern.subn(right, text)
-        if n > 0:
-            text = new_text
-            count += n
-
-    return text, count
-
 
 def chunks_by_paragraphs(text: str, max_len: int = 3000) -> list[str]:
     """Разбить текст на чанки по абзацам, не превышая max_len символов."""
@@ -164,7 +84,6 @@ def correct_gigachat(
     credentials: Optional[str] = None,
     chunk_size: int = 3000,
     sleep: float = 0.3,
-    system_prompt: str = "",
 ) -> tuple[str, dict]:
     """Коррекция через GigaChat API (Сбер)."""
     try:
@@ -179,7 +98,6 @@ def correct_gigachat(
         print("  Получите ключ на https://developers.sber.ru/studio/")
         return text, {"error": "no credentials"}
 
-    prompt = system_prompt or SYSTEM_PROMPT
     chunks = chunks_by_paragraphs(text, max_len=chunk_size)
     fixed_chunks: list[str] = []
     total_in = 0
@@ -202,7 +120,7 @@ def correct_gigachat(
                 try:
                     chat = Chat(
                         messages=[
-                            Messages(role=MessagesRole.SYSTEM, content=prompt),
+                            Messages(role=MessagesRole.SYSTEM, content=SYSTEM_PROMPT),
                             Messages(role=MessagesRole.USER, content=chunk),
                         ],
                         temperature=0.15,
@@ -253,14 +171,9 @@ def correct_text(
     api_key: Optional[str] = None,
     chunk_size: int = 3000,
     sleep: float = 0.3,
-    corrections_file: Optional[str] = None,
 ) -> tuple[str, dict]:
     """
-    Коррекция текста через GigaChat с учётом базы коррекций.
-
-    Если указан corrections_file (или существует llm_corrections.json):
-      1. Пары коррекций добавляются в промпт как few-shot примеры
-      2. После LLM однословные пары применяются как словарь автозамен
+    Коррекция текста через GigaChat.
 
     Args:
         text: Исходный текст
@@ -268,45 +181,15 @@ def correct_text(
         api_key: GIGACHAT_CREDENTIALS (если пусто — берётся из env)
         chunk_size: Размер чанка в символах
         sleep: Пауза между запросами
-        corrections_file: Путь к файлу коррекций (llm_corrections.json)
 
     Returns:
         (исправленный текст, статистика)
     """
-    # --- Загружаем коррекции ---
-    corr_path = Path(corrections_file) if corrections_file else None
-    pairs = load_corrections(corr_path)
-
-    system_prompt = SYSTEM_PROMPT
-    dictionary: dict[str, str] = {}
-
-    if pairs:
-        print(f"  Загружено коррекций: {len(pairs)}")
-        # Few-shot дополнение к промпту
-        fewshot = build_fewshot_prompt(pairs, max_examples=15)
-        if fewshot:
-            system_prompt = SYSTEM_PROMPT + fewshot
-        # Словарь автозамен
-        dictionary = build_dictionary(pairs)
-        if dictionary:
-            print(f"  Словарь автозамен: {len(dictionary)} слов")
-
-    # --- Вызов GigaChat ---
     creds = api_key or os.environ.get(GIGACHAT_ENV_KEY, "")
     m = model or GIGACHAT_DEFAULT_MODEL
-    result, stats = correct_gigachat(
-        text, model=m, credentials=creds, chunk_size=chunk_size,
-        sleep=sleep, system_prompt=system_prompt,
+    return correct_gigachat(
+        text, model=m, credentials=creds, chunk_size=chunk_size, sleep=sleep,
     )
-
-    # --- Применяем словарь автозамен после LLM ---
-    if dictionary and "error" not in stats:
-        result, dict_fixes = apply_dictionary(result, dictionary)
-        if dict_fixes:
-            print(f"  Словарь автозамен: {dict_fixes} замен применено")
-        stats["dictionary_fixes"] = dict_fixes
-
-    return result, stats
 
 
 def to_html(text: str, title: str) -> str:
@@ -346,8 +229,7 @@ def main():
     ap.add_argument("--outdir", default="out", help="Папка вывода")
     ap.add_argument("--title", default="Документ (LLM)", help="Заголовок HTML")
     ap.add_argument(
-        "--model",
-        default="",
+        "--model", default="",
         help="Модель GigaChat (по умолчанию: GigaChat)",
     )
     ap.add_argument(
@@ -361,10 +243,6 @@ def main():
     ap.add_argument(
         "--sleep", type=float, default=0.5,
         help="Пауза между запросами (сек, по умолчанию: 0.5)",
-    )
-    ap.add_argument(
-        "--corrections", default="",
-        help="Файл коррекций JSON (по умолчанию: llm_corrections.json рядом со скриптом)",
     )
     args = ap.parse_args()
 
@@ -384,7 +262,6 @@ def main():
         api_key=args.api_key,
         chunk_size=args.chunk_size,
         sleep=args.sleep,
-        corrections_file=args.corrections or None,
     )
 
     out_txt = outdir / "final_llm.txt"

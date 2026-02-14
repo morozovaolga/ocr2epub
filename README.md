@@ -149,7 +149,6 @@ python pdf_to_epub.py \
 | `--llm-model MODEL` | Модель GigaChat (по умолчанию: `GigaChat`) |
 | `--llm-api-key KEY` | GIGACHAT_CREDENTIALS (или через `.env`) |
 | `--llm-chunk-size N` | Размер чанка (по умолчанию: 3000) |
-| `--llm-corrections FILE` | Файл коррекций для обучения (по умолчанию: `llm_corrections.json`) |
 
 ### Контекстная проверка и пост-очистка
 
@@ -199,49 +198,6 @@ python preprocess_pdf.py --pdf scan.pdf --out scan_clean.pdf --steps deskew,cont
 GigaChat Lite (Сбер) — **бесплатно**, 3 млн токенов. Хватает на несколько книг по 200+ страниц.
 
 Ключ получаете на [developers.sber.ru/studio](https://developers.sber.ru/studio/), регистрация через Сбер ID.
-
-## Обучение на ручных исправлениях
-
-LLM-коррекция учится на ваших правках и с каждой книгой работает точнее.
-
-### Цикл обучения
-
-```
-1. Обработать PDF пайплайном         -> out/final_llm.txt
-2. Вручную исправить оставшиеся ошибки -> corrected.txt
-3. Извлечь пары "ошибка -> исправление" -> llm_corrections.json
-4. При следующем запуске -- коррекции применяются автоматически
-```
-
-**Шаг 1.** Обработайте PDF:
-
-```bash
-python pdf_to_epub.py --pdf book.pdf --title "Название" \
-  --llm-correct --epub-template sample.epub
-```
-
-**Шаг 2.** Откройте `out/final_llm.txt`, исправьте оставшиеся ошибки, сохраните как `corrected.txt`.
-
-**Шаг 3.** Извлеките коррекции:
-
-```bash
-python llm_learn.py --auto out/final_llm.txt --corrected corrected.txt
-```
-
-**Шаг 4.** Проверьте базу:
-
-```bash
-python llm_learn.py --show
-```
-
-### Как это работает
-
-При наличии файла `llm_corrections.json` в следующий запуск:
-
-1. **Few-shot примеры** — до 15 пар коррекций добавляются в промпт GigaChat, модель видит типичные ошибки и учится их распознавать.
-2. **Словарь автозамен** — однословные пары применяются автоматически после LLM (точное совпадение по границам слов).
-
-Чем больше книг обработаете — тем точнее результат.
 
 ## Лицензия
 

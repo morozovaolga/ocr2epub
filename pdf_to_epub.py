@@ -99,7 +99,6 @@ def main():
     parser.add_argument('--llm-model', default='', help='Модель GigaChat (по умолчанию: GigaChat)')
     parser.add_argument('--llm-api-key', default='', help='GIGACHAT_CREDENTIALS (или через env)')
     parser.add_argument('--llm-chunk-size', type=int, default=3000, help='Размер чанка для LLM (по умолчанию: 3000)')
-    parser.add_argument('--llm-corrections', default='', help='Файл коррекций для обучения LLM (по умолчанию: llm_corrections.json)')
     
     # Этап 7: Контекстная проверка (опционально)
     parser.add_argument('--context-check', action='store_true', help='Контекстная проверка (местоимение+глагол)')
@@ -297,8 +296,6 @@ def main():
                 llm_cmd.extend(["--model", args.llm_model])
             if args.llm_api_key:
                 llm_cmd.extend(["--api-key", args.llm_api_key])
-            if args.llm_corrections:
-                llm_cmd.extend(["--corrections", args.llm_corrections])
             if not run_cmd(llm_cmd, f"Этап 6: LLM-коррекция (GigaChat)"):
                 return 1
             
