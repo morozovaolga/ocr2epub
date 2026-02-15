@@ -51,6 +51,38 @@ SYSTEM_PROMPT = (
     "7. Верни ТОЛЬКО исправленный текст, без комментариев и пояснений."
 )
 
+# Промпт для осторожного режима: не менять сомнительные слова, а выносить в список
+SYSTEM_PROMPT_CAUTIOUS = (
+    "Ты — корректор текста. Тебе дан фрагмент русского текста из книги, "
+    "распознанный OCR из PDF (возможно, дореволюционного издания). "
+    "В тексте могут быть ошибки распознавания: пропущенные или лишние буквы, "
+    "замена похожих букв (н↔п, м↔ш, о↔с и т.д.), разорванные слова, "
+    "неверная пунктуация.\n\n"
+    "Правила:\n"
+    "1. Исправляй ТОЛЬКО те OCR-ошибки, в которых ты уверен на 100%.\n"
+    "2. Если слово выглядит подозрительно, но ты НЕ уверен в правильном варианте — "
+    "НЕ МЕНЯЙ его в тексте, оставь как есть.\n"
+    "3. НЕ меняй стиль, лексику, порядок слов.\n"
+    "4. НЕ добавляй и НЕ удаляй предложения.\n"
+    "5. Сохраняй все абзацы (двойные переносы строк).\n"
+    "6. Сохраняй регистр букв.\n"
+    "7. Если слово выглядит необычно, но корректно (имя, архаизм, термин) — "
+    "не трогай его.\n\n"
+    "Формат ответа:\n"
+    "Сначала выведи исправленный текст.\n"
+    "Затем, если есть сомнительные слова, добавь строку-разделитель:\n"
+    "===СОМНИТЕЛЬНЫЕ===\n"
+    "И ниже — список сомнительных слов, по одному на строку, в формате:\n"
+    "слово — причина сомнения\n\n"
+    "Пример:\n"
+    "===СОМНИТЕЛЬНЫЕ===\n"
+    "привзтствовал — возможно, «приветствовал» (замена е→з)\n"
+    "камнатъ — возможно, «комнат» (о→а, лишний ъ)\n\n"
+    "Если сомнительных слов нет — не добавляй разделитель, верни только текст."
+)
+
+DOUBT_SEPARATOR = "===СОМНИТЕЛЬНЫЕ==="
+
 # Настройки GigaChat
 GIGACHAT_ENV_KEY = "GIGACHAT_CREDENTIALS"
 GIGACHAT_DEFAULT_MODEL = "GigaChat"
@@ -78,33 +110,67 @@ def chunks_by_paragraphs(text: str, max_len: int = 3000) -> list[str]:
 # GigaChat (Сбер)
 # ---------------------------------------------------------------------------
 
+def _parse_cautious_response(response: str) -> tuple[str, list[str]]:
+    """Разбирает ответ модели в осторожном режиме: текст + список сомнений.
+    
+    Returns:
+        (исправленный_текст, список_сомнительных_слов)
+    """
+    if DOUBT_SEPARATOR in response:
+        parts = response.split(DOUBT_SEPARATOR, 1)
+        clean_text = parts[0].rstrip()
+        doubt_lines = [
+            line.strip() for line in parts[1].strip().splitlines()
+            if line.strip()
+        ]
+        return clean_text, doubt_lines
+    return response, []
+
+
 def correct_gigachat(
     text: str,
     model: str = "GigaChat",
     credentials: Optional[str] = None,
     chunk_size: int = 3000,
     sleep: float = 0.3,
-) -> tuple[str, dict]:
-    """Коррекция через GigaChat API (Сбер)."""
+    cautious: bool = False,
+) -> tuple[str, dict, list[str]]:
+    """Коррекция через GigaChat API (Сбер).
+    
+    Args:
+        cautious: если True, модель не меняет сомнительные слова,
+                  а выносит их в отдельный список.
+    
+    Returns:
+        (исправленный_текст, статистика, список_сомнений)
+    """
     try:
         from gigachat import GigaChat
         from gigachat.models import Chat, Messages, MessagesRole
     except ImportError:
         print("Ошибка: gigachat не установлен. Установите: pip install gigachat")
-        return text, {"error": "gigachat not installed"}
+        return text, {"error": "gigachat not installed"}, []
 
     if not credentials:
         print("Ошибка: не указан GIGACHAT_CREDENTIALS (env или --api-key)")
         print("  Получите ключ на https://developers.sber.ru/studio/")
-        return text, {"error": "no credentials"}
+        return text, {"error": "no credentials"}, []
+
+    prompt = SYSTEM_PROMPT_CAUTIOUS if cautious else SYSTEM_PROMPT
+    if cautious:
+        print("  Режим: осторожный (сомнительные слова не меняются, выносятся в список)")
 
     chunks = chunks_by_paragraphs(text, max_len=chunk_size)
     fixed_chunks: list[str] = []
+    all_doubts: list[str] = []
     total_in = 0
     total_out = 0
 
     max_retries = 4
     RETRYABLE_CODES = {"429", "502", "503", "504"}
+
+    # В осторожном режиме нужно больше токенов для списка сомнений
+    extra_tokens = 800 if cautious else 500
 
     with GigaChat(
         credentials=credentials,
@@ -120,11 +186,11 @@ def correct_gigachat(
                 try:
                     chat = Chat(
                         messages=[
-                            Messages(role=MessagesRole.SYSTEM, content=SYSTEM_PROMPT),
+                            Messages(role=MessagesRole.SYSTEM, content=prompt),
                             Messages(role=MessagesRole.USER, content=chunk),
                         ],
                         temperature=0.15,
-                        max_tokens=len(chunk) + 500,
+                        max_tokens=len(chunk) + extra_tokens,
                     )
                     resp = client.chat(chat)
                     result = resp.choices[0].message.content if resp.choices else chunk
@@ -132,8 +198,22 @@ def correct_gigachat(
                     out_tok = resp.usage.completion_tokens if resp.usage else 0
                     total_in += in_tok
                     total_out += out_tok
-                    print(f"OK ({in_tok}+{out_tok} tok)")
-                    fixed_chunks.append(result)
+
+                    # В осторожном режиме разбираем ответ
+                    if cautious:
+                        clean_text, doubts = _parse_cautious_response(result)
+                        fixed_chunks.append(clean_text)
+                        if doubts:
+                            all_doubts.extend(
+                                f"[чанк {i}] {d}" for d in doubts
+                            )
+                            print(f"OK ({in_tok}+{out_tok} tok, {len(doubts)} сомнит.)")
+                        else:
+                            print(f"OK ({in_tok}+{out_tok} tok)")
+                    else:
+                        fixed_chunks.append(result)
+                        print(f"OK ({in_tok}+{out_tok} tok)")
+
                     success = True
                     break
                 except Exception as exc:
@@ -158,7 +238,7 @@ def correct_gigachat(
         "input_tokens": total_in,
         "output_tokens": total_out,
     }
-    return "".join(fixed_chunks), stats
+    return "".join(fixed_chunks), stats, all_doubts
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +251,8 @@ def correct_text(
     api_key: Optional[str] = None,
     chunk_size: int = 3000,
     sleep: float = 0.3,
-) -> tuple[str, dict]:
+    cautious: bool = False,
+) -> tuple[str, dict, list[str]]:
     """
     Коррекция текста через GigaChat.
 
@@ -181,14 +262,17 @@ def correct_text(
         api_key: GIGACHAT_CREDENTIALS (если пусто — берётся из env)
         chunk_size: Размер чанка в символах
         sleep: Пауза между запросами
+        cautious: осторожный режим — не менять сомнительные слова,
+                  а выносить их в отдельный список
 
     Returns:
-        (исправленный текст, статистика)
+        (исправленный текст, статистика, список сомнительных слов)
     """
     creds = api_key or os.environ.get(GIGACHAT_ENV_KEY, "")
     m = model or GIGACHAT_DEFAULT_MODEL
     return correct_gigachat(
         text, model=m, credentials=creds, chunk_size=chunk_size, sleep=sleep,
+        cautious=cautious,
     )
 
 
@@ -244,6 +328,11 @@ def main():
         "--sleep", type=float, default=0.5,
         help="Пауза между запросами (сек, по умолчанию: 0.5)",
     )
+    ap.add_argument(
+        "--cautious", action="store_true",
+        help="Осторожный режим: не менять сомнительные слова, "
+             "а выносить их в отдельный файл doubt_words.txt",
+    )
     args = ap.parse_args()
 
     if not args.inp:
@@ -256,12 +345,13 @@ def main():
     print(f"Входной текст: {len(text)} символов")
     print(f"Провайдер: GigaChat")
 
-    fixed_text, stats = correct_text(
+    fixed_text, stats, doubts = correct_text(
         text,
         model=args.model,
         api_key=args.api_key,
         chunk_size=args.chunk_size,
         sleep=args.sleep,
+        cautious=args.cautious,
     )
 
     out_txt = outdir / "final_llm.txt"
@@ -270,6 +360,26 @@ def main():
     out_html.write_text(to_html(fixed_text, args.title), encoding="utf-8")
 
     print(f"Сохранено: {out_txt}, {out_html}")
+
+    # Сохраняем список сомнительных слов
+    if doubts:
+        doubt_file = outdir / "doubt_words.txt"
+        doubt_content = (
+            "Сомнительные слова (модель не уверена в правильности)\n"
+            "=" * 60 + "\n\n"
+            + "\n".join(doubts) + "\n"
+        )
+        doubt_file.write_text(doubt_content, encoding="utf-8")
+        print(f"\nСомнительных слов: {len(doubts)}")
+        print(f"Список сохранён: {doubt_file}")
+        # Показываем первые несколько
+        for d in doubts[:10]:
+            print(f"  {d}")
+        if len(doubts) > 10:
+            print(f"  ... и ещё {len(doubts) - 10}")
+    elif args.cautious:
+        print("\nСомнительных слов не обнаружено")
+
     if "error" not in stats:
         print(
             f"Статистика: GigaChat/{stats['model']}, "

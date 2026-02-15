@@ -736,8 +736,15 @@ def generate_cover_image(
     return img_bytes.getvalue()
 
 
-def create_xhtml_section(blocks, title, css_href="../Styles/Style0001.css"):
-    """Создать XHTML файл для раздела - БЕЗ фильтрации, добавляем все блоки"""
+def create_xhtml_section(blocks, title, css_href="../Styles/Style0001.css", book_title=""):
+    """Создать XHTML файл для раздела - БЕЗ фильтрации, добавляем все блоки.
+    
+    Args:
+        blocks: список блоков текста
+        title: заголовок секции (для отладки)
+        css_href: путь к CSS
+        book_title: название книги для тега <title> (если пустой, используется title)
+    """
     body_parts = []
     blocks_added = 0
     blocks_skipped = 0
@@ -760,12 +767,15 @@ def create_xhtml_section(blocks, title, css_href="../Styles/Style0001.css"):
     if blocks_skipped > 0 or blocks_added != len(blocks):
         print(f"   create_xhtml_section '{title[:30]}...': добавлено {blocks_added} блоков, пропущено {blocks_skipped} из {len(blocks)}")
     
+    # В <title> вставляем название книги, а не заголовок секции
+    html_title = book_title if book_title else title
+    
     xhtml = f'''<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
 <head>
- <title>{hesc(title)}</title>
+ <title>{hesc(html_title)}</title>
  <link href="{css_href}" rel="stylesheet" type="text/css"/>
 </head>
 
@@ -1089,7 +1099,7 @@ def generate_epub(
             section_title = chapter.get("title") or title
             
             # Проверяем размер XHTML перед записью
-            xhtml_content = create_xhtml_section(filtered_blocks, section_title)
+            xhtml_content = create_xhtml_section(filtered_blocks, section_title, book_title=title)
             xhtml_size = len(xhtml_content.encode("utf-8"))
             
             section_file = text_path / section_id
@@ -1396,6 +1406,73 @@ def generate_epub(
         print(f"EPUB создан: {output_epub}")
 
 
+def validate_epub(epub_path: Path) -> bool:
+    """Валидация EPUB через epubcheck. Выводит ошибки/предупреждения в терминал.
+    
+    Returns:
+        True если EPUB валиден, False если есть ошибки.
+    """
+    try:
+        from epubcheck import EpubCheck
+    except ImportError:
+        print("\n⚠️  epubcheck не установлен. Для валидации EPUB установите:")
+        print("   pip install epubcheck")
+        print("   (также требуется Java)")
+        return True  # Не считаем отсутствие epubcheck ошибкой
+
+    print(f"\n🔍 Валидация EPUB: {epub_path.name}")
+    try:
+        result = EpubCheck(str(epub_path))
+    except Exception as e:
+        print(f"⚠️  Ошибка при запуске epubcheck: {e}")
+        print("   Убедитесь, что Java установлена и доступна в PATH")
+        return True  # Не блокируем пайплайн
+
+    if result.valid:
+        print("✅ EPUB валиден — ошибок не найдено")
+    else:
+        print("❌ EPUB содержит ошибки:")
+
+    # Выводим сообщения
+    errors = 0
+    warnings = 0
+    if hasattr(result, 'messages') and result.messages:
+        for msg in result.messages:
+            # msg может быть объектом с атрибутами или словарём
+            if hasattr(msg, 'level'):
+                level = msg.level
+                message = getattr(msg, 'message', str(msg))
+                location = getattr(msg, 'location', '')
+            elif isinstance(msg, dict):
+                level = msg.get('severity', msg.get('level', 'ERROR'))
+                message = msg.get('message', str(msg))
+                location = msg.get('location', msg.get('locations', ''))
+            else:
+                level = 'INFO'
+                message = str(msg)
+                location = ''
+
+            level_str = str(level).upper()
+            if 'ERROR' in level_str or 'FATAL' in level_str:
+                errors += 1
+                print(f"   ❌ ОШИБКА: {message}")
+                if location:
+                    print(f"      Место: {location}")
+            elif 'WARN' in level_str:
+                warnings += 1
+                print(f"   ⚠️  Предупреждение: {message}")
+                if location:
+                    print(f"      Место: {location}")
+            else:
+                print(f"   ℹ️  {message}")
+
+    # Итог
+    if errors > 0 or warnings > 0:
+        print(f"\n   Итого: {errors} ошибок, {warnings} предупреждений")
+    
+    return result.valid
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Генерация EPUB на основе шаблона и текста из JSON, HTML или TXT"
@@ -1412,6 +1489,7 @@ def main():
     )
     ap.add_argument("--max-chapter-size", type=int, default=50, help="Максимальный размер главы/секции в KB (по умолчанию 50)")
     ap.add_argument("--use-chapter-heads", action="store_true", help="Использовать поиск заголовков для разделения на главы (по умолчанию: простое разделение по размеру)")
+    ap.add_argument("--no-validate", action="store_true", help="Пропустить валидацию EPUB через epubcheck")
     args = ap.parse_args()
     
     template_epub = Path(args.template)
@@ -1492,6 +1570,10 @@ def main():
         max_chapter_size_kb=args.max_chapter_size,
         use_chapter_heads=args.use_chapter_heads,
     )
+    
+    # Валидация EPUB через epubcheck
+    if not args.no_validate and output_epub.exists():
+        validate_epub(output_epub)
     
     return 0
 

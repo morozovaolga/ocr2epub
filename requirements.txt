@@ -9,5 +9,8 @@ python-dotenv>=1.0.0
 # LLM-коррекция через GigaChat (Сбер):
 gigachat>=0.2.0
 
+# Валидация EPUB (требует Java):
+epubcheck>=5.1.0
+
 # Зависимости для парсинга словаря:
 openpyxl>=3.1.0

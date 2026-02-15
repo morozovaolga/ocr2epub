@@ -99,6 +99,7 @@ def main():
     parser.add_argument('--llm-model', default='', help='Модель GigaChat (по умолчанию: GigaChat)')
     parser.add_argument('--llm-api-key', default='', help='GIGACHAT_CREDENTIALS (или через env)')
     parser.add_argument('--llm-chunk-size', type=int, default=3000, help='Размер чанка для LLM (по умолчанию: 3000)')
+    parser.add_argument('--llm-cautious', action='store_true', help='Осторожный режим LLM: не менять сомнительные слова, а вынести их в doubt_words.txt')
     
     # Этап 7: Контекстная проверка (опционально)
     parser.add_argument('--context-check', action='store_true', help='Контекстная проверка (местоимение+глагол)')
@@ -296,6 +297,8 @@ def main():
                 llm_cmd.extend(["--model", args.llm_model])
             if args.llm_api_key:
                 llm_cmd.extend(["--api-key", args.llm_api_key])
+            if args.llm_cautious:
+                llm_cmd.append("--cautious")
             if not run_cmd(llm_cmd, f"Этап 6: LLM-коррекция (GigaChat)"):
                 return 1
             

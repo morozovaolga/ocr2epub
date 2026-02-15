@@ -26,7 +26,53 @@ def collect_block_text(block) -> str:
     return text.strip()
 
 
-def page_blocks_with_roles(page, two_columns=False):
+def is_page_number(block, page_height: float, page_width: float) -> bool:
+    """
+    Определяет, является ли блок номером страницы.
+    
+    Критерии (все должны совпасть):
+      1. Позиция: верхние или нижние 8% страницы
+      2. Содержимое: только цифры (арабские или римские),
+         возможно с окружающими тире, точками, пробелами
+      3. Размер: 1 строка, не более 20 символов
+    """
+    x0, y0, x1, y1 = block["bbox"]
+    text = block["text"].strip()
+    line_count = block["line_count"]
+    chars = block["chars"]
+    
+    # Критерий 3: короткий блок (1 строка, мало символов)
+    if line_count > 1 or chars > 20:
+        return False
+    
+    # Критерий 1: позиция — верхние или нижние 8% страницы
+    margin = page_height * 0.08
+    in_top = y1 < margin
+    in_bottom = y0 > page_height - margin
+    if not (in_top or in_bottom):
+        return False
+    
+    # Критерий 2: содержимое — только число (арабское или римское)
+    # Убираем обрамление: тире, точки, пробелы
+    cleaned = re.sub(r'^[\s\-—–.*·•]+|[\s\-—–.*·•]+$', '', text)
+    if not cleaned:
+        return False
+    
+    # Арабские цифры: "42", "7", "123"
+    if re.fullmatch(r'\d{1,4}', cleaned):
+        return True
+    
+    # Римские цифры: "XII", "iv", "XLII"
+    if re.fullmatch(r'[IVXLCDMivxlcdm]+', cleaned):
+        # Дополнительная проверка: только валидные римские цифры
+        roman_pattern = r'^[Mm]{0,3}([Cc][Mm]|[Cc][Dd]|[Dd]?[Cc]{0,3})([Xx][Cc]|[Xx][Ll]|[Ll]?[Xx]{0,3})([Ii][Xx]|[Ii][Vv]|[Vv]?[Ii]{0,3})$'
+        if re.fullmatch(roman_pattern, cleaned, re.IGNORECASE):
+            return True
+    
+    return False
+
+
+def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False):
     d = page.get_text("dict")
     blocks = []
     sizes = []
@@ -59,6 +105,19 @@ def page_blocks_with_roles(page, two_columns=False):
             "line_count": len(lines),
             "chars": total_chars,
         })
+
+    # Фильтрация номеров страниц
+    _removed_count = 0
+    if not keep_page_numbers:
+        ph = page.rect.height
+        pw_for_filter = page.rect.width
+        filtered = []
+        for b in blocks:
+            if is_page_number(b, ph, pw_for_filter):
+                _removed_count += 1
+            else:
+                filtered.append(b)
+        blocks = filtered
     # Determine heading threshold per page
     # Используем более строгий порог для определения заголовков
     if blocks:
@@ -115,7 +174,7 @@ def page_blocks_with_roles(page, two_columns=False):
     else:
         # Default: sort by reading order (top, then left)
         blocks.sort(key=lambda x: (x["bbox"][1], x["bbox"][0]))
-    return blocks
+    return blocks, _removed_count
 
 
 def to_html(blocks, title: str) -> str:
@@ -144,6 +203,7 @@ def main():
     ap.add_argument("--pdf", required=True, help="Input PDF path")
     ap.add_argument("--outdir", default="output_vol2", help="Output directory")
     ap.add_argument("--two-columns", action="store_true", help="Process pages with two columns: left column first, then right column")
+    ap.add_argument("--keep-page-numbers", action="store_true", help="Не удалять номера страниц из текста (по умолчанию: удаляются)")
     args = ap.parse_args()
 
     pdf_path = Path(args.pdf)
@@ -153,9 +213,13 @@ def main():
     doc = fitz.open(pdf_path)
     all_blocks = []
     headings_found = []
+    page_nums_removed = 0
     for i in range(len(doc)):
         page = doc.load_page(i)
-        p_blocks = page_blocks_with_roles(page, two_columns=args.two_columns)
+        p_blocks, removed = page_blocks_with_roles(
+            page, two_columns=args.two_columns,
+            keep_page_numbers=args.keep_page_numbers)
+        page_nums_removed += removed
         for b in p_blocks:
             block_data = {
                 "page": i + 1,
@@ -179,6 +243,12 @@ def main():
         print(f"\nНайдено заголовков: {len(headings_found)}")
         for h in headings_found:
             print(f"  Страница {h['page']}: \"{h['text']}\" (размер шрифта: {h['wsize']})")
+
+    # Статистика по номерам страниц
+    if page_nums_removed > 0:
+        print(f"Удалено номеров страниц: {page_nums_removed}")
+    elif not args.keep_page_numbers:
+        print("Номера страниц не обнаружены")
 
     # Save JSON
     struct = {"file": pdf_path.name, "blocks": all_blocks}

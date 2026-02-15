@@ -8,6 +8,7 @@
 
 - Python 3.10+
 - API-ключ GigaChat: [developers.sber.ru/studio](https://developers.sber.ru/studio/)
+- Java (для валидации EPUB через [epubcheck](https://pypi.org/project/epubcheck/), опционально)
 
 ## Установка
 
@@ -91,7 +92,7 @@ python pdf_to_epub.py \
 | # | Этап | Скрипт | Описание |
 |---|------|--------|----------|
 | 0 | Предобработка PDF | `preprocess_pdf.py` | Выравнивание, шумодав, контраст, бинаризация (перед OCR) |
-| 1 | Извлечение структуры | `extract_structured_text.py` | PDF -> JSON с блоками текста (heading / paragraph) |
+| 1 | Извлечение структуры | `extract_structured_text.py` | PDF -> JSON с блоками текста, автоудаление номеров страниц |
 | 2 | Старая орфография | `oldspelling.py` | Применение правил дореформенной орфографии |
 | 3 | Токенизация | `stanza_tokenizer.py` | Улучшение разбиения на предложения (опционально) |
 | 4 | Модернизация | `modernize_structured.py` | Дореволюционная -> современная орфография и типографика |
@@ -100,7 +101,7 @@ python pdf_to_epub.py \
 | 7 | Контекстная проверка | `context_checker.py` | Проверка местоимение + глагол, разорванные слова |
 | 8 | Пост-очистка | `post_cleanup.py` | Склейка букв, замена латиницы -> кириллица |
 | 9 | Natasha | `natasha_sync.py` | Синхронизация имён собственных из PDF |
-| 10 | Генерация EPUB | `generate_epub.py` | Разбиение на главы, обложка, оглавление |
+| 10 | Генерация EPUB | `generate_epub.py` | Разбиение на главы, обложка, оглавление, валидация epubcheck |
 
 ## Флаги командной строки
 
@@ -119,6 +120,7 @@ python pdf_to_epub.py \
 | `--author "..."` | Автор книги (для обложки EPUB) |
 | `--two-columns` | PDF с двумя колонками |
 | `--no-oldspelling` | Пропустить правила дореформенной орфографии |
+| `--keep-page-numbers` | Не удалять номера страниц (по умолчанию: удаляются) |
 | `--html` | Генерировать промежуточные HTML-файлы для ручной проверки |
 
 ### Предобработка PDF (перед OCR)
@@ -147,6 +149,7 @@ python pdf_to_epub.py \
 | `--llm-model MODEL` | Модель GigaChat (по умолчанию: `GigaChat`) |
 | `--llm-api-key KEY` | GIGACHAT_CREDENTIALS (или через `.env`) |
 | `--llm-chunk-size N` | Размер чанка (по умолчанию: 3000) |
+| `--llm-cautious` | Осторожный режим: не менять сомнительные слова, а вынести в `doubt_words.txt` |
 
 ### Контекстная проверка и пост-очистка
 
@@ -189,7 +192,8 @@ python preprocess_pdf.py --pdf scan.pdf --out scan_clean.pdf --steps deskew,cont
 | `final_clean.txt` | После LanguageTool + Yandex.Speller |
 | `final_llm.txt` | После LLM-коррекции (GigaChat) |
 | `final_better.txt` | После пост-очистки |
-| `Название_книги.epub` | Готовый EPUB с обложкой |
+| `doubt_words.txt` | Сомнительные слова (при `--llm-cautious`) |
+| `Название_книги.epub` | Готовый EPUB с обложкой (валидируется epubcheck) |
 
 ## Лицензия
 
