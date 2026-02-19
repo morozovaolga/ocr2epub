@@ -1,5 +1,6 @@
 import argparse
 import inspect
+import os
 import re
 from pathlib import Path
 from html import escape as hesc
@@ -19,9 +20,42 @@ except ImportError:
     MORPH_AVAILABLE = False
     MorphAnalyzer = None
 except Exception as e:
-    # Если есть другие ошибки (например, проблемы с совместимостью), просто отключаем
     MORPH_AVAILABLE = False
     MorphAnalyzer = None
+
+# Navec — компактные русские эмбеддинги для дополнительной проверки слов
+_navec_model = None
+
+def _load_navec():
+    """Ленивая загрузка navec модели."""
+    global _navec_model
+    if _navec_model is not None:
+        return _navec_model
+    try:
+        from navec import Navec
+        home = os.path.expanduser("~")
+        model_path = os.path.join(home, ".navec", "navec_hudlit_v1_12B_500K_300d_100q.tar")
+        if os.path.exists(model_path):
+            _navec_model = Navec.load(model_path)
+            return _navec_model
+    except Exception:
+        pass
+    _navec_model = False
+    return None
+
+def _in_navec(word: str, _cache: dict = {}) -> bool:
+    """Проверяет наличие слова в navec (500K слов)."""
+    navec = _load_navec()
+    if not navec:
+        return False
+    wl = word.lower()
+    if wl in _cache:
+        return _cache[wl]
+    result = wl in navec
+    if not result and wl.endswith('ъ') and len(wl) > 2:
+        result = wl[:-1] in navec
+    _cache[wl] = result
+    return result
 
 
 LAT_TO_CYR = {
@@ -54,6 +88,51 @@ LAT_TO_CYR = {
 }
 
 
+# Древнерусская / архаичная лексика, не распознаваемая pymorphy2,
+# но являющаяся валидными словами (используется для валидации при склейке)
+OLD_RUSSIAN_WORDS = {
+    # Глагольные формы
+    "есмя", "есми", "есмь", "поидох", "поидохом", "приидох", "внидох",
+    "бых", "быхом", "идох", "взях", "видех", "обретох", "рекох",
+    # Наречия и частицы
+    "велми", "вельми", "зело", "токмо", "паки", "понеже", "аще",
+    "инде", "зане", "занеже", "убо", "яко", "ино",
+    # Существительные
+    "град", "грады",
+    # Местоимения и формы
+    "язь", "азъ", "аз", "мя", "тя", "ся",
+    # Титулы и имена
+    "султан", "салтан", "хан", "бег", "бек", "возырь", "возыри",
+    "мелик", "тучар", "шах", "ширваншах",
+    # Географические
+    "бедер", "бедери", "бедеря", "чюнер", "чюнере", "чюнеря",
+    "гурмыз", "гурмыза", "гурмызе", "ормус", "ормуса",
+    "дабыл", "дабыла", "дабыли", "келекот", "келекота",
+    "гундустан", "гундустани", "гундустаньский",
+    "хоросань", "хоросанский", "хоросанец", "хоросанцы",
+    "бесермен", "бесермены", "бесерменский", "бесерменьский",
+    "бесерменьской", "бесерменьская", "бесерменьское", "бесерменьские",
+    # Древнерусские глагольные формы
+    "бысть", "быти", "бяше", "бяху", "рече", "рекоша",
+    "сказа", "глагола", "глаголя", "глаголаше",
+    "хожаше", "хождаше", "хожение", "хождение",
+    "живяше", "стояше", "бояше", "идяше", "идяху", "имяше",
+    # Дореволюционные формы с ъ/ь
+    "приидоша", "поидоша",
+    "великомъ", "княжении", "тверскомъ",
+    # Предлоги/союзы дореволюционной орфографии
+    "въ", "изъ", "къ", "подъ", "надъ", "предъ", "объ",
+    # Слова из текста «Хождения за три моря»
+    "фота", "алафу", "тенекь", "ковов", "тенек",
+    "осподарыни", "осподарь",
+}
+
+
+def _is_old_russian_valid(word: str) -> bool:
+    """Проверяет, является ли слово валидным древнерусским словом."""
+    return word.lower() in OLD_RUSSIAN_WORDS
+
+
 def replace_odd_symbols(text: str) -> str:
     repl = {
         "■": " ",
@@ -79,64 +158,219 @@ def convert_mixed_latin_to_cyr(text: str) -> str:
 
 
 def join_spaced_letters(text: str, morph: MorphAnalyzer = None) -> str:
-    # "В ы р е з к а" -> "Вырезка"
-    # Очень консервативная склейка: только если все части - одиночные буквы
+    """Склеивает последовательности коротких фрагментов через пробел.
+    
+    "В ы р е з к а" -> "Вырезка"
+    "Ка ра м зи н" -> "Карамзин"
+    
+    Разрешены фрагменты до 3 символов (не только одиночные буквы).
+    """
     def _join_if_safe(m: re.Match) -> str:
         spaced = m.group(0)
         parts = spaced.split()
-        # Склеиваем только если ВСЕ части - одиночные буквы (не слова)
-        if all(len(p) == 1 and p.isalpha() for p in parts):
-            joined = spaced.replace(" ", "")
-            # Если доступен морфологический анализатор, проверяем валидность
+        if len(parts) < 2:
+            return spaced
+        # Разрешаем части до 3 символов (не только одиночные буквы)
+        if all(len(p) <= 3 and p.isalpha() for p in parts):
+            joined = "".join(parts)
+            if len(joined) < 3:
+                return spaced
+            # Проверяем словарь древнерусских слов (приоритет)
+            if _is_old_russian_valid(joined):
+                return joined
+            # Проверяем navec (надёжнее pymorphy2 для целых слов)
+            if _in_navec(joined):
+                return joined
             if morph:
-                parsed = morph.parse(joined)
-                # Если склеенное слово не валидно, оставляем как есть
-                if not parsed or parsed[0].score < 0.1:
-                    return spaced
-            return joined
+                parsed = morph.parse(joined.lower())
+                score = parsed[0].score if parsed else 0.0
+                # Двойная проверка: DictionaryAnalyzer + высокий score,
+                # т.к. pymorphy2 даёт false-positive для мусорных склеек
+                is_dict = False
+                if parsed and parsed[0].methods_stack:
+                    method = type(parsed[0].methods_stack[0][0]).__name__
+                    is_dict = method == "DictionaryAnalyzer"
+                if is_dict and score >= 0.3:
+                    return joined
+                # Если все одиночные буквы — склеиваем без колебаний
+                if all(len(p) == 1 for p in parts):
+                    return joined
+                # Если все части <= 2 символа и score неплохой — склеиваем
+                if all(len(p) <= 2 for p in parts) and score >= 0.01:
+                    return joined
+                return spaced
+            # Без морфологии — склеиваем если все одиночные
+            if all(len(p) == 1 for p in parts):
+                return joined
+            return spaced
         return spaced
     
-    return re.sub(r"(?<!\S)(?:[А-ЯЁа-яё]\s){2,}[А-ЯЁа-яё](?!\S)", _join_if_safe, text)
+    # Последовательности кириллических фрагментов <=3 символа через пробел
+    return re.sub(
+        r"(?<!\S)(?:[А-ЯЁа-яё]{1,3}\s){2,}[А-ЯЁа-яё]{1,3}(?!\S)",
+        _join_if_safe, text
+    )
 
 
-def fix_intraword_small_gaps(text: str, morph: MorphAnalyzer = None) -> str:
-    # Join cases like "обни мают" when parts are mostly short
-    # ОЧЕНЬ консервативная склейка: только если части явно не являются валидными словами
-    def _sub(m: re.Match) -> str:
-        seg = m.group(0)
-        parts = seg.split()
-        
-        # Если доступен морфологический анализатор, проверяем валидность частей
-        if morph:
-            # Проверяем, являются ли части валидными словами
-            parts_are_valid_words = []
-            for part in parts:
-                if len(part) > 2:  # Проверяем только слова длиннее 2 символов
-                    parsed = morph.parse(part)
-                    # Считаем слово валидным, если score высокий (≥0.5) ИЛИ это известная часть речи
-                    is_valid = parsed and (
-                        parsed[0].score >= 0.5 or  # Высокая уверенность
-                        any(p.tag.POS in {
-                            "NOUN", "ADJF", "ADJS", "VERB", "INFN", "PRTF", "PRTS",
-                            "NPRO", "PREP", "CONJ", "PRCL", "INTJ"  # Добавляем местоимения, предлоги и др.
-                        } for p in parsed[:2])  # Проверяем первые 2 варианта
-                    )
-                    parts_are_valid_words.append(is_valid)
-                else:
-                    parts_are_valid_words.append(False)  # Короткие части не проверяем
-            
-            # Если хотя бы одна часть - валидное слово, НЕ склеиваем
-            if any(parts_are_valid_words):
-                return seg
-        
-        # Старая логика: склеиваем только если большинство частей очень короткие
-        short = sum(1 for p in parts if len(p) <= 2)
-        # Более строгие условия: все части должны быть короткими (≤2) И общая длина ≥5
-        if len(parts) >= 2 and short == len(parts) and len("".join(parts)) >= 5:
-            return "".join(parts)
-        return seg
-    
-    return re.sub(r"(?<![\w-])(?:[А-ЯЁа-яё]+(?:\s+[А-ЯЁа-яё]+)+)(?![\w-])", _sub, text)
+_conf_cache: dict = {}
+_pos_cache: dict = {}
+_norm_cache: dict = {}
+
+
+def _word_confidence(word: str, morph) -> float:
+    """pymorphy2 confidence score; 0.0 для UNKN или если morph недоступен."""
+    wl = word.lower()
+    if wl in _conf_cache:
+        return _conf_cache[wl]
+    score = 0.0
+    if morph:
+        parses = morph.parse(wl)
+        if parses:
+            best = parses[0]
+            if "UNKN" not in str(best.tag):
+                score = best.score
+    _conf_cache[wl] = score
+    return score
+
+
+def _get_pos(word: str, morph) -> str | None:
+    """POS-тег лучшего разбора pymorphy2 (NOUN, VERB, PREP, CONJ…)."""
+    wl = word.lower()
+    if wl in _pos_cache:
+        return _pos_cache[wl]
+    pos = None
+    if morph:
+        parses = morph.parse(wl)
+        if parses:
+            best = parses[0]
+            if "UNKN" not in str(best.tag):
+                pos = best.tag.POS
+    _pos_cache[wl] = pos
+    return pos
+
+
+def _get_norm(word: str, morph) -> str:
+    """Нормальная форма (лемма) слова по pymorphy2."""
+    wl = word.lower()
+    if wl in _norm_cache:
+        return _norm_cache[wl]
+    norm = wl
+    if morph:
+        parses = morph.parse(wl)
+        if parses:
+            best = parses[0]
+            if "UNKN" not in str(best.tag):
+                norm = best.normal_form
+    _norm_cache[wl] = norm
+    return norm
+
+
+_CYR_TOKEN_RE = re.compile(r'([А-Яа-яЁё]+|[^А-Яа-яЁё]+)')
+_CYR_WORD_RE = re.compile(r'^[А-Яа-яЁё]+$')
+_FUNCTIONAL_POS = frozenset({'CONJ', 'PRCL', 'NPRO'})
+
+
+def merge_broken_words(text: str, morph=None, max_passes: int = 5) -> tuple:
+    """Склеивает разорванные слова попарным обходом токенов.
+
+    Алгоритм:
+    - Токенизация текста на кириллические слова и разделители
+    - Попарная проверка (left, пробел, right) → merged
+    - merged ДОЛЖЕН быть в navec (500K словарь)
+    - Защита предлогов/союзов/частиц/местоимений от ложных склеек
+    - Многопроходность для каскадных склеек ("бе дный" → "бедный")
+
+    Возвращает (очищенный_текст, количество_склеек).
+    """
+    total_merges = 0
+
+    def _is_cyr(w):
+        return bool(_CYR_WORD_RE.match(w))
+
+    def _single_pass(txt):
+        nonlocal total_merges
+        tokens = _CYR_TOKEN_RE.findall(txt)
+        result = []
+        i = 0
+        pass_merges = 0
+
+        while i < len(tokens):
+            if (i + 2 < len(tokens)
+                    and _is_cyr(tokens[i])
+                    and tokens[i + 1] == ' '
+                    and _is_cyr(tokens[i + 2])):
+                left = tokens[i]
+                right = tokens[i + 2]
+                merged = left + right
+                ml = merged.lower()
+
+                if _is_old_russian_valid(ml):
+                    pass_merges += 1
+                    result.append(merged)
+                    i += 3
+                    continue
+
+                if _in_navec(ml):
+                    if morph:
+                        left_pos = _get_pos(left, morph)
+                        right_conf = _word_confidence(right, morph)
+
+                        if left_pos in _FUNCTIONAL_POS and right_conf > 0.3:
+                            result.append(tokens[i])
+                            i += 1
+                            continue
+
+                        if left_pos == 'PREP' and right_conf > 0.3:
+                            merged_pos = _get_pos(merged, morph)
+                            if merged_pos != 'ADVB':
+                                right_norm = _get_norm(right, morph)
+                                merged_norm = _get_norm(merged, morph)
+                                if len(left) == 1:
+                                    if merged_norm != left.lower() + right_norm:
+                                        result.append(tokens[i])
+                                        i += 1
+                                        continue
+                                else:
+                                    if right_norm not in merged_norm:
+                                        result.append(tokens[i])
+                                        i += 1
+                                        continue
+
+                        left_conf = _word_confidence(left, morph)
+                        merged_conf = _word_confidence(merged, morph)
+                        right_conf = _word_confidence(right, morph)
+
+                        do_merge = False
+                        if left_conf == 0:
+                            do_merge = True
+                        elif merged_conf > left_conf:
+                            do_merge = True
+                        elif right_conf < 0.1:
+                            do_merge = True
+
+                        if do_merge:
+                            pass_merges += 1
+                            result.append(merged)
+                            i += 3
+                            continue
+                    else:
+                        pass_merges += 1
+                        result.append(merged)
+                        i += 3
+                        continue
+
+            result.append(tokens[i])
+            i += 1
+
+        total_merges += pass_merges
+        return ''.join(result), pass_merges
+
+    for _ in range(max_passes):
+        text, count = _single_pass(text)
+        if count == 0:
+            break
+
+    return text, total_merges
 
 
 
@@ -174,6 +408,45 @@ def fix_common_ocr_errors(text: str) -> str:
     return text
 
 
+def remove_page_numbers_and_headers(text: str) -> str:
+    """Удаляет номера страниц и колонтитулы из текста.
+    
+    Паттерны:
+    - Одиночные числа на отдельных строках (номера страниц)
+    - Колонтитулы типа "Т. II. К. 8."
+    - Повторяющиеся заголовки с номерами вида "172 ПУТЕШЕСТВИЕ"
+    - Колонтитулы "ТВЕРСКАГО КУПЦА АФАНАСИЯ НИКИТИНА В ИНДИЮ 173"
+    """
+    # Одиночные числа на отдельных строках (номера страниц)
+    text = re.sub(r'\n\s*\d{1,3}\s*\n', '\n', text)
+    
+    # Числа в начале или конце строки, окружённые пустыми строками
+    text = re.sub(r'\n\n\s*\d{1,3}\s*\n\n', '\n\n', text)
+    
+    # Колонтитулы типа "Т. II. К. 8." или "Т. II. К. 8. *"
+    text = re.sub(r'Т\.\s*II\.\s*К\.\s*\d+\.?\s*\*?\s*', '', text)
+    
+    # Вставки типа "172 ПУТЕШЕСТВИЕ" (число + слово капсом в начале строки)
+    text = re.sub(r'^\d{1,3}\s+[А-ЯЁ]{4,}', '', text, flags=re.MULTILINE)
+    
+    # Колонтитулы "ТВЕРСКАГО КУПЦА АФАНАСИЯ НИКИТИНА В ИНДИЮ 173"
+    text = re.sub(
+        r'^[А-ЯЁ\s]{15,}\d{1,3}\s*$',
+        '', text, flags=re.MULTILINE
+    )
+    
+    # Дублированные заголовки капсом на отдельных строках (>15 символов капсом)
+    text = re.sub(
+        r'^\s*[А-ЯЁ\s,]{15,}\s*$',
+        '', text, flags=re.MULTILINE
+    )
+    
+    # Убираем образовавшиеся множественные пустые строки
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text
+
+
 def cleanup_text(text: str) -> str:
     # Инициализируем морфологический анализатор, если доступен
     morph = None
@@ -195,9 +468,11 @@ def cleanup_text(text: str) -> str:
     t = re.sub(r"(?<!\n)\n(?!\n)", " ", t)
     # Collapse spaces
     t = re.sub(r"[ \t]{2,}", " ", t)
-    # Консервативная склейка с проверкой валидности слов
+    # Удаление номеров страниц и колонтитулов
+    t = remove_page_numbers_and_headers(t)
+    # Склейка с проверкой валидности слов
     t = join_spaced_letters(t, morph)
-    t = fix_intraword_small_gaps(t, morph)
+    t, merge_count = merge_broken_words(t, morph)
     t = fix_common_ocr_errors(t)
     t = convert_mixed_latin_to_cyr(t)
     return t.strip()

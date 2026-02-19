@@ -89,6 +89,12 @@ def main():
     
     # Этап 4: Модернизация (всегда выполняется)
     
+    # Этап 4.5: Десппейсинг — склейка разорванных пробелами слов (опционально)
+    parser.add_argument('--despace', action='store_true', help='Агрессивная склейка разорванных пробелами слов (для сканов старых книг с увеличенным кернингом)')
+    
+    # Этап 4.6: Разбиение склеенных слов (опционально)
+    parser.add_argument('--word-split', action='store_true', help='Разбиение склеенных слов (обратный деспейсинг: "АфанасийНикитин" → "Афанасий Никитин")')
+    
     # Этап 5: LanguageTool + YandexSpeller (опционально)
     parser.add_argument('--lt-cloud', action='store_true', help='Использовать LanguageTool (облачная проверка)')
     parser.add_argument('--yandex-speller', action='store_true', help='Дополнительно использовать Yandex.Speller (бесплатно)')
@@ -100,6 +106,8 @@ def main():
     parser.add_argument('--llm-api-key', default='', help='GIGACHAT_CREDENTIALS (или через env)')
     parser.add_argument('--llm-chunk-size', type=int, default=3000, help='Размер чанка для LLM (по умолчанию: 3000)')
     parser.add_argument('--llm-cautious', action='store_true', help='Осторожный режим LLM: не менять сомнительные слова, а вынести их в doubt_words.txt')
+    parser.add_argument('--llm-old-russian', action='store_true', help='Режим для старорусских/древнерусских текстов: агрессивная склейка разорванных слов, сохранение архаизмов')
+    parser.add_argument('--llm-user-context', default='', help='Дополнительный контекст для LLM (напр. "Текст из «Хождения за три моря» XV века")')
     
     # Этап 7: Контекстная проверка (опционально)
     parser.add_argument('--context-check', action='store_true', help='Контекстная проверка (местоимение+глагол)')
@@ -244,6 +252,50 @@ def main():
     # Определяем входной файл для проверок орфографии
     spell_input = outdir / "final.txt"
     
+    # Этап 4.5: Десппейсинг (опционально)
+    if args.despace:
+        print(f"  {step_num}. Десппейсинг (склейка разорванных слов)")
+        step_num += 1
+        
+        if not spell_input.exists():
+            print(f"⚠️  Предупреждение: {spell_input.name} не найден — десппейсинг пропущен")
+        else:
+            despace_out = outdir / "final_despaced.txt"
+            despace_cmd = [
+                sys.executable,
+                str(here / "despacer.py"),
+                "--in", str(spell_input),
+                "--out", str(despace_out),
+                "--title", args.title + " (Despaced)",
+            ]
+            if not run_cmd(despace_cmd, f"Этап 4.5: Десппейсинг"):
+                return 1
+            
+            if despace_out.exists():
+                spell_input = despace_out
+    
+    # Этап 4.6: Разбиение склеенных слов (опционально)
+    if args.word_split:
+        print(f"  {step_num}. Разбиение склеенных слов (word splitting)")
+        step_num += 1
+        
+        if not spell_input.exists():
+            print(f"⚠️  Предупреждение: {spell_input.name} не найден — word splitting пропущен")
+        else:
+            wsplit_out = outdir / "final_wsplit.txt"
+            wsplit_cmd = [
+                sys.executable,
+                str(here / "word_splitter.py"),
+                "--in", str(spell_input),
+                "--out", str(wsplit_out),
+                "--title", args.title + " (Word Split)",
+            ]
+            if not run_cmd(wsplit_cmd, f"Этап 4.6: Разбиение склеенных слов"):
+                return 1
+            
+            if wsplit_out.exists():
+                spell_input = wsplit_out
+    
     # Этап 5: LanguageTool + YandexSpeller (опционально)
     if args.lt_cloud or args.yandex_speller:
         checkers_desc = []
@@ -299,6 +351,10 @@ def main():
                 llm_cmd.extend(["--api-key", args.llm_api_key])
             if args.llm_cautious:
                 llm_cmd.append("--cautious")
+            if args.llm_old_russian:
+                llm_cmd.append("--old-russian")
+            if args.llm_user_context:
+                llm_cmd.extend(["--user-context", args.llm_user_context])
             if not run_cmd(llm_cmd, f"Этап 6: LLM-коррекция (GigaChat)"):
                 return 1
             
@@ -421,6 +477,8 @@ def main():
             outdir / "final_better.txt",  # После post-clean (если был)
             outdir / "final_llm.txt",     # После LLM-коррекции (если была)
             outdir / "final_clean.txt",   # После LanguageTool/YandexSpeller
+            outdir / "final_despaced.txt", # После десппейсинга (если был)
+            outdir / "final_wsplit.txt",   # После разбиения склеенных слов (если был)
             outdir / "final.txt",
             outdir / "structured_rules.json",
             outdir / "structured.json",
