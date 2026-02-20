@@ -759,6 +759,13 @@ def create_xhtml_section(blocks, title, css_href="../Styles/Style0001.css", book
         text_escaped = hesc(text)
         if block.get("role") == "heading":
             body_parts.append(f"<h2>{text_escaped}</h2>")
+        elif block.get("role") == "verse":
+            stanzas = text_escaped.split("\n\n")
+            for stanza in stanzas:
+                lines = stanza.split("\n")
+                body_parts.append(
+                    '<div class="stanza"><p>' + "<br/>".join(lines) + "</p></div>"
+                )
         else:
             body_parts.append(f"<p>{text_escaped}</p>")
         blocks_added += 1
@@ -1061,6 +1068,15 @@ def generate_epub(
                 print(f"Предупреждение: не удалось создать обложку: {e}")
         else:
             print("Предупреждение: Pillow не установлен, обложка не будет создана")
+        
+        # Добавляем CSS для стихотворных блоков
+        styles_path = oebps_path / "Styles"
+        if styles_path.exists():
+            for css_file in styles_path.glob("*.css"):
+                css_text = css_file.read_text(encoding="utf-8")
+                if ".stanza" not in css_text:
+                    css_text += "\n.stanza { margin: 0.8em 2em; }\n.stanza p { text-indent: 0; }\n"
+                    css_file.write_text(css_text, encoding="utf-8")
         
         # Удаляем старые Section и Chapter файлы
         for old_section in text_path.glob("Section*.xhtml"):
@@ -1550,7 +1566,11 @@ def main():
     # Подсчитываем блоки по типам
     heading_count = sum(1 for b in blocks if b.get("role") == "heading")
     paragraph_count = sum(1 for b in blocks if b.get("role") == "paragraph")
-    print(f"Блоков-заголовков: {heading_count}, блоков-абзацев: {paragraph_count}")
+    verse_count = sum(1 for b in blocks if b.get("role") == "verse")
+    stats = f"Блоков-заголовков: {heading_count}, блоков-абзацев: {paragraph_count}"
+    if verse_count:
+        stats += f", блоков-стихов: {verse_count}"
+    print(stats)
     
     cover_colors = None
     if args.cover_colors:

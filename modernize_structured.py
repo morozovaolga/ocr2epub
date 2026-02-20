@@ -132,6 +132,12 @@ def merge_paragraph_blocks(blocks):
                 buf = None
             merged.append({"role": "heading", "text": text})
             continue
+        if role == "verse":
+            if buf is not None:
+                merged.append({"role": "paragraph", "text": buf})
+                buf = None
+            merged.append({"role": "verse", "text": b.get("text") or ""})
+            continue
         # paragraph
         if buf is None:
             buf = text
@@ -160,6 +166,12 @@ def render_html(blocks, title: str):
         t = b["text"] or ""
         if b["role"] == "heading":
             body.append(f"<h2>{t}</h2>")
+        elif b["role"] == "verse":
+            from html import escape as _esc
+            stanzas = _esc(t).split("\n\n")
+            for stanza in stanzas:
+                lines = stanza.split("\n")
+                body.append('<div class="stanza"><p>' + "<br/>".join(lines) + "</p></div>")
         else:
             body.append(f"<p>{t}</p>")
     return head + "\n".join(body) + "\n</body>\n</html>\n"
@@ -174,12 +186,15 @@ def main():
 
     data = json.loads(Path(args.inp).read_text(encoding="utf-8"))
     blocks = data.get("blocks", [])
-    # 1) Normalize punctuation/linebreaks per block first (no flags yet)
     norm_blocks = []
     for b in blocks:
         txt = b.get("text") or ""
-        txt = normalize_linebreaks(txt)
-        txt = normalize_punct(txt)
+        if b.get("role") == "verse":
+            out_lines = [normalize_punct(ln) for ln in txt.split("\n")]
+            txt = "\n".join(out_lines)
+        else:
+            txt = normalize_linebreaks(txt)
+            txt = normalize_punct(txt)
         norm_blocks.append({"role": b.get("role"), "text": txt, "page": b.get("page")})
 
     # 2) Merge paragraph blocks to avoid mid‑sentence breaks
@@ -199,9 +214,16 @@ def main():
     # Write HTML and TXT
     html = render_html(new_blocks, args.title)
     Path(outdir / "final.html").write_text(html, encoding="utf-8")
-    # Plain TXT without tags: strip tags crudely
     txt_plain = "\n\n".join(re.sub(r"<[^>]+>", "", b["text"]) for b in new_blocks)
     Path(outdir / "final.txt").write_text(txt_plain, encoding="utf-8")
+
+    # Structured JSON with roles preserved (for EPUB generation)
+    has_verse = any(b.get("role") == "verse" for b in new_blocks)
+    if has_verse:
+        struct_out = {"file": data.get("file", ""), "blocks": new_blocks}
+        Path(outdir / "final_structured.json").write_text(
+            json.dumps(struct_out, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     # Flags
     Path(outdir / "flags.json").write_text(json.dumps(flags_all, ensure_ascii=False, indent=2), encoding="utf-8")

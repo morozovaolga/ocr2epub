@@ -7,6 +7,11 @@ pymorphy2>=0.9.0
 navec>=0.7.0
 python-dotenv>=1.0.0
 
+# OCR-движки (опционально, для --ocr-engine):
+easyocr>=1.7.0
+pytesseract>=0.3.10
+python-doctr>=1.0.0
+
 # LLM-коррекция через GigaChat (Сбер):
 gigachat>=0.2.0
 

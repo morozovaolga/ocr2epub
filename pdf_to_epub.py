@@ -79,6 +79,13 @@ def main():
     
     # Этап 1: Извлечение структуры (обязательно)
     parser.add_argument('--two-columns', action='store_true', help='PDF с двумя колонками на странице')
+    parser.add_argument('--ocr-engine', default='auto',
+                        choices=['auto', 'pymupdf', 'easyocr', 'tesseract', 'doctr'],
+                        help='OCR-движок: auto (PyMuPDF + фоллбэк), pymupdf, easyocr, tesseract, doctr (по умолчанию: auto)')
+    parser.add_argument('--ocr-dpi', type=int, default=300,
+                        help='DPI рендеринга для OCR-движков (по умолчанию: 300)')
+    parser.add_argument('--poetry', action='store_true',
+                        help='Принудительно считать все блоки (кроме заголовков) стихами — сохранять переносы строк')
     
     # Этап 2: Oldspelling (опционально)
     parser.add_argument('--no-oldspelling', action='store_true', help='Пропустить применение правил старой орфографии')
@@ -182,22 +189,42 @@ def main():
         else:
             print(f"⚠️  Предупреждение: предобработанный PDF не создан, используем оригинал")
     
-    # Этап 1: Извлечение структуры из PDF (PyMuPDF)
-    print(f"  {step_num}. Извлечение структуры из PDF")
+    # Этап 1: Извлечение структуры из PDF
+    engine = getattr(args, 'ocr_engine', 'auto')
+    ocr_dpi = getattr(args, 'ocr_dpi', 300)
+    engine_label = engine if engine != 'auto' else 'auto (PyMuPDF + OCR-фоллбэк)'
+    print(f"  {step_num}. Извлечение структуры из PDF (движок: {engine_label})")
     step_num += 1
-    
-    extract_cmd = [
-        sys.executable,
-        str(here / "extract_structured_text.py"),
-        "--pdf", str(pdf_path),
-        "--outdir", str(outdir)
-    ]
-    if args.two_columns:
-        extract_cmd.append("--two-columns")
-    
-    if not run_cmd(extract_cmd, f"Этап 1: Извлечение структуры"):
-        return 1
-    
+
+    if engine in ('easyocr', 'tesseract', 'doctr') or engine == 'auto':
+        ocr_cmd = [
+            sys.executable,
+            str(here / "ocr_engine.py"),
+            "--pdf", str(pdf_path),
+            "--outdir", str(outdir),
+            "--engine", engine,
+            "--dpi", str(ocr_dpi),
+        ]
+        if args.two_columns:
+            ocr_cmd.append("--two-columns")
+        if args.poetry:
+            ocr_cmd.append("--poetry")
+        if not run_cmd(ocr_cmd, f"Этап 1: Извлечение структуры (OCR: {engine})"):
+            return 1
+    else:
+        extract_cmd = [
+            sys.executable,
+            str(here / "extract_structured_text.py"),
+            "--pdf", str(pdf_path),
+            "--outdir", str(outdir)
+        ]
+        if args.two_columns:
+            extract_cmd.append("--two-columns")
+        if args.poetry:
+            extract_cmd.append("--poetry")
+        if not run_cmd(extract_cmd, f"Этап 1: Извлечение структуры (PyMuPDF)"):
+            return 1
+
     # Определяем входной файл для следующих этапов
     structured_in = outdir / "structured.json"
     
@@ -402,6 +429,8 @@ def main():
                 "--html", str(outdir / "final_better.html"),
                 "--title", args.title + " (Post-clean)"
             ]
+            if args.poetry:
+                post_clean_cmd.append("--preserve-newlines")
             
             if not run_cmd(post_clean_cmd, f"Этап 8: Пост-очистка"):
                 return 1
@@ -479,6 +508,7 @@ def main():
             outdir / "final_clean.txt",   # После LanguageTool/YandexSpeller
             outdir / "final_despaced.txt", # После десппейсинга (если был)
             outdir / "final_wsplit.txt",   # После разбиения склеенных слов (если был)
+            outdir / "final_structured.json",  # Модернизированный JSON с ролями (стихи)
             outdir / "final.txt",
             outdir / "structured_rules.json",
             outdir / "structured.json",
@@ -567,7 +597,6 @@ def main():
             # Показываем краткую информацию о содержимом
             try:
                 if epub_source.suffix.lower() == ".json":
-                    import json
                     data = json.loads(epub_source.read_text(encoding="utf-8"))
                     blocks = data.get("blocks", [])
                     blocks_with_text = [b for b in blocks if b.get("text", "").strip()]

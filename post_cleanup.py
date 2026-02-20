@@ -447,8 +447,7 @@ def remove_page_numbers_and_headers(text: str) -> str:
     return text
 
 
-def cleanup_text(text: str) -> str:
-    # Инициализируем морфологический анализатор, если доступен
+def cleanup_text(text: str, preserve_newlines: bool = False) -> str:
     morph = None
     if MORPH_AVAILABLE:
         try:
@@ -459,18 +458,13 @@ def cleanup_text(text: str) -> str:
     t = text.replace("\r\n", "\n").replace("\r", "\n")
     t = re.sub(r"[\u200B\u200C\u200D\u00AD]", "", t)
     t = replace_odd_symbols(t)
-    # Em dash spacing: unify and ensure spaces on both sides
     t = t.replace("–", "—")
     t = re.sub(r"\s*—\s*", " — ", t)
-    # Dehyphenate across newlines (already normalized, but keep it safe)
-    t = re.sub(r"([\wА-Яа-яЁё])[-\-\–\—]\n(?=[\wА-Яа-яЁё])", r"\1", t)
-    # Merge single line breaks inside paragraphs
-    t = re.sub(r"(?<!\n)\n(?!\n)", " ", t)
-    # Collapse spaces
+    if not preserve_newlines:
+        t = re.sub(r"([\wА-Яа-яЁё])[-\-\–\—]\n(?=[\wА-Яа-яЁё])", r"\1", t)
+        t = re.sub(r"(?<!\n)\n(?!\n)", " ", t)
     t = re.sub(r"[ \t]{2,}", " ", t)
-    # Удаление номеров страниц и колонтитулов
     t = remove_page_numbers_and_headers(t)
-    # Склейка с проверкой валидности слов
     t = join_spaced_letters(t, morph)
     t, merge_count = merge_broken_words(t, morph)
     t = fix_common_ocr_errors(t)
@@ -497,12 +491,14 @@ def main():
     ap.add_argument("--out", dest="out", required=True, help="Выходной TXT")
     ap.add_argument("--html", dest="html", help="Необязательный путь для HTML")
     ap.add_argument("--title", default="После доп. очистки", help="Заголовок HTML")
+    ap.add_argument("--preserve-newlines", action="store_true",
+                    help="Не сливать одиночные переносы строк (для стихов)")
     args = ap.parse_args()
 
     src = Path(args.inp)
     dst = Path(args.out)
     text = src.read_text(encoding="utf-8", errors="replace")
-    cleaned = cleanup_text(text)
+    cleaned = cleanup_text(text, preserve_newlines=args.preserve_newlines)
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(cleaned, encoding="utf-8")
     if args.html:

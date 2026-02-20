@@ -6,24 +6,82 @@ from pathlib import Path
 import fitz  # PyMuPDF
 
 
-def collect_block_text(block) -> str:
-    lines = block.get("lines", [])
-    # Concatenate spans per line, then join lines with \n
-    line_texts = []
-    for ln in lines:
+def _collect_lines(block) -> list[tuple[str, float]]:
+    """Извлекает строки из блока PyMuPDF как список (текст, x0)."""
+    result = []
+    for ln in block.get("lines", []):
         spans = ln.get("spans", [])
         txt = "".join(sp.get("text", "") for sp in spans)
-        line_texts.append(txt)
-    text = "\n".join(line_texts)
-    # Normalize newlines and dehyphenate line-wrapped words within block
+        x0 = ln.get("bbox", [0])[0]
+        result.append((txt, x0))
+    return result
+
+
+def collect_block_text(block) -> str:
+    pairs = _collect_lines(block)
+    text = "\n".join(txt for txt, _ in pairs)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    # Remove hyphen at line end if next line continues the word
     text = re.sub(r"(\w)[\-‑–—]\n(?=\w)", r"\1", text)
-    # Merge single newlines inside block into spaces, keep paragraph feel per block
     text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
-    # Collapse spaces
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text.strip()
+
+
+_JUNK_LINE_RE = re.compile(r"^[\s\-–—&*•·#§†‡©®™°¬]+$")
+
+
+def _is_junk_line(text: str) -> bool:
+    """Строка-мусор: только спецсимволы, без букв и цифр."""
+    if not text:
+        return True
+    if _JUNK_LINE_RE.fullmatch(text):
+        return True
+    return False
+
+
+def collect_block_text_raw(block) -> str:
+    """Текст блока с сохранёнными переносами строк (для стихов)."""
+    pairs = _collect_lines(block)
+    if not pairs:
+        return ""
+    out = []
+    for txt, _ in pairs:
+        txt = re.sub(r"[ \t]{2,}", " ", txt).strip()
+        if not txt or _is_junk_line(txt):
+            continue
+        out.append(txt)
+    return "\n".join(out)
+
+
+def _is_verse_block(raw_text: str, line_count: int) -> bool:
+    """Эвристика: является ли блок стихотворным.
+
+    Критерии:
+    - Минимум 3 строки
+    - Средняя длина строки < 55 символов
+    - Большинство строк начинаются с заглавной буквы
+    - Строки не выглядят как оборванные слова (прозаический перенос)
+    """
+    lines = [ln for ln in raw_text.split("\n") if ln.strip()]
+    if len(lines) < 3:
+        return False
+    avg_len = sum(len(ln) for ln in lines) / len(lines)
+    if avg_len > 55:
+        return False
+    caps = sum(1 for ln in lines if ln and ln[0].isupper())
+    if caps < len(lines) * 0.5:
+        return False
+    # Прозаический перенос: строка кончается строчной буквой, следующая
+    # начинается со строчной — признак разрыва слова/фразы, а не стиха
+    prose_wraps = 0
+    for i in range(len(lines) - 1):
+        cur = lines[i].rstrip(" ,;:.!?")
+        nxt = lines[i + 1]
+        if cur and nxt and cur[-1].islower() and nxt[0].islower():
+            prose_wraps += 1
+    if prose_wraps > len(lines) * 0.3:
+        return False
+    return True
 
 
 def is_page_number(block, page_height: float, page_width: float) -> bool:
@@ -72,7 +130,8 @@ def is_page_number(block, page_height: float, page_width: float) -> bool:
     return False
 
 
-def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False):
+def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False,
+                           poetry=False):
     d = page.get_text("dict")
     blocks = []
     sizes = []
@@ -80,9 +139,9 @@ def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False):
         if b.get("type", 0) != 0:
             continue
         text = collect_block_text(b)
+        raw_text = collect_block_text_raw(b)
         if not text:
             continue
-        # Weighted average font size by span char count
         lines = b.get("lines", [])
         total_chars = 0
         wsum = 0.0
@@ -101,6 +160,7 @@ def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False):
         blocks.append({
             "bbox": b.get("bbox", [0, 0, 0, 0]),
             "text": text,
+            "raw_text": raw_text,
             "wsize": wsize,
             "line_count": len(lines),
             "chars": total_chars,
@@ -152,7 +212,17 @@ def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False):
         elif b["chars"] <= 50 and b["line_count"] == 1 and b["wsize"] >= med * 1.3:
             is_heading = True
         
-        b["role"] = "heading" if is_heading else "paragraph"
+        if is_heading:
+            b["role"] = "heading"
+        elif poetry and b["line_count"] >= 2:
+            b["role"] = "verse"
+            b["text"] = b["raw_text"]
+        elif _is_verse_block(b["raw_text"], b["line_count"]):
+            b["role"] = "verse"
+            b["text"] = b["raw_text"]
+        else:
+            b["role"] = "paragraph"
+        b.pop("raw_text", None)
     
     # Sort by reading order
     if two_columns:
@@ -184,6 +254,11 @@ def to_html(blocks, title: str) -> str:
         text = esc(blk["text"]) if blk["text"] else ""
         if blk["role"] == "heading":
             body.append(f"<h2>{text}</h2>")
+        elif blk["role"] == "verse":
+            stanzas = text.split("\n\n")
+            for stanza in stanzas:
+                lines = stanza.split("\n")
+                body.append('<div class="stanza"><p>' + "<br/>".join(lines) + "</p></div>")
         else:
             body.append(f"<p>{text}</p>")
     return (
@@ -191,7 +266,7 @@ def to_html(blocks, title: str) -> str:
         "<meta charset=\"utf-8\"/>\n"
         f"<title>{esc(title)}</title>\n"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>\n"
-        "<style>body{font:18px/1.6 Georgia,Times,\"Times New Roman\",serif;margin:2rem;max-width:48rem;color:#111;background:#fff} h2{font-size:1.15em;margin:1.2rem 0 .6rem} p{margin:0 0 1rem}</style>\n"
+        "<style>body{font:18px/1.6 Georgia,Times,\"Times New Roman\",serif;margin:2rem;max-width:48rem;color:#111;background:#fff} h2{font-size:1.15em;margin:1.2rem 0 .6rem} p{margin:0 0 1rem} .stanza{margin:0.8em 2em} .stanza p{text-indent:0}</style>\n"
         "</head>\n<body contenteditable=\"true\" spellcheck=\"true\">\n"
         + "\n".join(body)
         + "\n</body>\n</html>\n"
@@ -204,6 +279,7 @@ def main():
     ap.add_argument("--outdir", default="output_vol2", help="Output directory")
     ap.add_argument("--two-columns", action="store_true", help="Process pages with two columns: left column first, then right column")
     ap.add_argument("--keep-page-numbers", action="store_true", help="Не удалять номера страниц из текста (по умолчанию: удаляются)")
+    ap.add_argument("--poetry", action="store_true", help="Принудительно считать все блоки (кроме заголовков) стихами — сохранять переносы строк")
     args = ap.parse_args()
 
     pdf_path = Path(args.pdf)
@@ -218,7 +294,8 @@ def main():
         page = doc.load_page(i)
         p_blocks, removed = page_blocks_with_roles(
             page, two_columns=args.two_columns,
-            keep_page_numbers=args.keep_page_numbers)
+            keep_page_numbers=args.keep_page_numbers,
+            poetry=args.poetry)
         page_nums_removed += removed
         for b in p_blocks:
             block_data = {
