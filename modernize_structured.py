@@ -186,6 +186,12 @@ def main():
 
     data = json.loads(Path(args.inp).read_text(encoding="utf-8"))
     blocks = data.get("blocks", [])
+    footnotes = data.get("footnotes", [])
+
+    # Normalize footnote texts
+    for fn in footnotes:
+        fn["text"] = normalize_punct(fn.get("text") or "")
+
     norm_blocks = []
     for b in blocks:
         txt = b.get("text") or ""
@@ -217,12 +223,18 @@ def main():
     txt_plain = "\n\n".join(re.sub(r"<[^>]+>", "", b["text"]) for b in new_blocks)
     Path(outdir / "final.txt").write_text(txt_plain, encoding="utf-8")
 
-    # Structured JSON with roles preserved (for EPUB generation)
+    # Structured JSON with roles and footnotes preserved (for EPUB generation)
     has_verse = any(b.get("role") == "verse" for b in new_blocks)
-    if has_verse:
+    if has_verse or footnotes:
         struct_out = {"file": data.get("file", ""), "blocks": new_blocks}
+        if footnotes:
+            struct_out["footnotes"] = footnotes
         Path(outdir / "final_structured.json").write_text(
             json.dumps(struct_out, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    if footnotes:
+        Path(outdir / "footnotes.json").write_text(
+            json.dumps(footnotes, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
     # Flags

@@ -16,6 +16,7 @@ out/
 output/
 output_vol2/
 old/
+*_out/
 
 # PDF files
 *.pdf

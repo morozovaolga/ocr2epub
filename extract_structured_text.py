@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import json
 import re
 from pathlib import Path
@@ -37,6 +38,139 @@ def _is_junk_line(text: str) -> bool:
     if _JUNK_LINE_RE.fullmatch(text):
         return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Footnote detection
+# ---------------------------------------------------------------------------
+
+def _is_footnote_body_block(raw_block, page_height: float, med_size: float) -> bool:
+    """Блок-тело сноски: внизу страницы, мелкий шрифт, начинается с цифры."""
+    bbox = raw_block.get("bbox", [0, 0, 0, 0])
+    if bbox[1] < page_height * 0.65:
+        return False
+    lines = raw_block.get("lines", [])
+    total_chars = 0
+    wsum = 0.0
+    for ln in lines:
+        for sp in ln.get("spans", []):
+            s = sp.get("size", 0)
+            t = sp.get("text", "") or ""
+            n = len(t)
+            if n and s:
+                wsum += s * n
+                total_chars += n
+    if total_chars == 0:
+        return False
+    avg_size = wsum / total_chars
+    if avg_size >= med_size * 0.92:
+        return False
+    full = "".join(
+        sp.get("text", "")
+        for ln in lines for sp in ln.get("spans", [])
+    ).strip()
+    if not full or not re.match(r"^\d", full):
+        return False
+    return True
+
+
+def _parse_footnote_block(raw_block) -> list[tuple[str, str]]:
+    """Разбирает блок сносок на пары (маркер, текст)."""
+    full_text = ""
+    for ln in raw_block.get("lines", []):
+        full_text += "".join(sp.get("text", "") for sp in ln.get("spans", [])) + "\n"
+    footnotes = []
+    cur_marker = None
+    cur_lines: list[str] = []
+    for line in full_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"^(\d+)\s*[.)]*\s+(.*)", line)
+        if m:
+            if cur_marker is not None:
+                footnotes.append((cur_marker, " ".join(cur_lines).strip()))
+            cur_marker = m.group(1)
+            cur_lines = [m.group(2)] if m.group(2) else []
+        elif cur_marker is not None:
+            cur_lines.append(line)
+    if cur_marker is not None:
+        footnotes.append((cur_marker, " ".join(cur_lines).strip()))
+    return footnotes
+
+
+def _is_superscript_digit(span, block_med_size: float = 0) -> bool:
+    """Superscript-цифра (маркер сноски в основном тексте).
+
+    Проверяет PyMuPDF superscript-флаг (bit 0) и, как фоллбэк,
+    сильно уменьшенный размер шрифта относительно медианы блока.
+    """
+    text = span.get("text", "").strip()
+    if not text or not re.fullmatch(r"\d{1,3}", text):
+        return False
+    if span.get("flags", 0) & 1:
+        return True
+    sz = span.get("size", 0)
+    if block_med_size > 0 and sz > 0 and sz < block_med_size * 0.85:
+        return True
+    return False
+
+
+def _block_median_size(block) -> float:
+    """Медианный размер шрифта блока (взвешенный по символам)."""
+    sizes: list[float] = []
+    for ln in block.get("lines", []):
+        for sp in ln.get("spans", []):
+            s = sp.get("size", 0)
+            n = len(sp.get("text", ""))
+            if s and n:
+                sizes.extend([s] * n)
+    if not sizes:
+        return 0
+    sizes.sort()
+    return sizes[len(sizes) // 2]
+
+
+def collect_block_text_fn(block, fn_id_map: dict[str, int]) -> str:
+    """collect_block_text с заменой superscript-маркеров на {{fn:N}}."""
+    med = _block_median_size(block)
+    line_texts = []
+    for ln in block.get("lines", []):
+        parts = []
+        for sp in ln.get("spans", []):
+            text = sp.get("text", "")
+            marker = text.strip()
+            if _is_superscript_digit(sp, med) and marker in fn_id_map:
+                parts.append(f"{{{{fn:{fn_id_map[marker]}}}}}")
+            else:
+                parts.append(text)
+        line_texts.append("".join(parts))
+    text = "\n".join(line_texts)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"(\w)[\-‑–—]\n(?=\w)", r"\1", text)
+    text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
+
+
+def collect_block_text_raw_fn(block, fn_id_map: dict[str, int]) -> str:
+    """collect_block_text_raw с заменой superscript-маркеров на {{fn:N}}."""
+    med = _block_median_size(block)
+    line_texts = []
+    for ln in block.get("lines", []):
+        parts = []
+        for sp in ln.get("spans", []):
+            text = sp.get("text", "")
+            marker = text.strip()
+            if _is_superscript_digit(sp, med) and marker in fn_id_map:
+                parts.append(f"{{{{fn:{fn_id_map[marker]}}}}}")
+            else:
+                parts.append(text)
+        txt = re.sub(r"[ \t]{2,}", " ", "".join(parts)).strip()
+        if not txt or _is_junk_line(txt):
+            continue
+        line_texts.append(txt)
+    return "\n".join(line_texts)
 
 
 def collect_block_text_raw(block) -> str:
@@ -131,17 +265,21 @@ def is_page_number(block, page_height: float, page_width: float) -> bool:
 
 
 def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False,
-                           poetry=False):
+                           poetry=False, fn_counter=None):
+    """Извлекает блоки со страницы, определяет роли и (опционально) сноски.
+
+    Returns:
+        (blocks, removed_page_nums, page_footnotes)
+    """
     d = page.get_text("dict")
-    blocks = []
-    sizes = []
-    for b in d.get("blocks", []):
-        if b.get("type", 0) != 0:
-            continue
-        text = collect_block_text(b)
-        raw_text = collect_block_text_raw(b)
-        if not text:
-            continue
+    raw_blocks = [b for b in d.get("blocks", []) if b.get("type", 0) == 0]
+
+    page_height = page.rect.height
+    page_width = page.rect.width
+
+    # --- Phase 1: basic info for all blocks ---
+    block_infos = []
+    for b in raw_blocks:
         lines = b.get("lines", [])
         total_chars = 0
         wsum = 0.0
@@ -156,41 +294,79 @@ def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False,
         if total_chars == 0:
             continue
         wsize = wsum / total_chars
-        sizes.append(wsize)
-        blocks.append({
-            "bbox": b.get("bbox", [0, 0, 0, 0]),
-            "text": text,
-            "raw_text": raw_text,
-            "wsize": wsize,
-            "line_count": len(lines),
-            "chars": total_chars,
+        block_infos.append({
+            "raw": b, "wsize": wsize,
+            "chars": total_chars, "line_count": len(lines),
         })
 
-    # Фильтрация номеров страниц
+    if not block_infos:
+        return [], 0, []
+
+    all_wsizes = sorted(bi["wsize"] for bi in block_infos)
+    med_size = all_wsizes[len(all_wsizes) // 2]
+
+    # --- Phase 2: detect footnote bodies ---
+    fn_body_indices: set[int] = set()
+    per_page_fn: dict[str, str] = {}
+    fn_id_map: dict[str, int] = {}
+    page_footnotes: list[dict] = []
+
+    if fn_counter is not None:
+        for idx, bi in enumerate(block_infos):
+            if _is_footnote_body_block(bi["raw"], page_height, med_size):
+                for marker, text in _parse_footnote_block(bi["raw"]):
+                    per_page_fn[marker] = text
+                fn_body_indices.add(idx)
+        for marker in sorted(per_page_fn, key=lambda m: int(m) if m.isdigit() else 0):
+            gid = next(fn_counter)
+            fn_id_map[marker] = gid
+            page_footnotes.append({
+                "id": gid, "marker": str(gid),
+                "text": per_page_fn[marker],
+            })
+
+    # --- Phase 3: build blocks (skip footnote bodies) ---
+    blocks = []
+    for idx, bi in enumerate(block_infos):
+        if idx in fn_body_indices:
+            continue
+        raw = bi["raw"]
+        if fn_id_map:
+            text = collect_block_text_fn(raw, fn_id_map)
+            raw_text = collect_block_text_raw_fn(raw, fn_id_map)
+        else:
+            text = collect_block_text(raw)
+            raw_text = collect_block_text_raw(raw)
+        if not text:
+            continue
+        blocks.append({
+            "bbox": raw.get("bbox", [0, 0, 0, 0]),
+            "text": text, "raw_text": raw_text,
+            "wsize": bi["wsize"],
+            "line_count": bi["line_count"], "chars": bi["chars"],
+        })
+
+    # --- Page number filtering ---
     _removed_count = 0
     if not keep_page_numbers:
-        ph = page.rect.height
-        pw_for_filter = page.rect.width
         filtered = []
         for b in blocks:
-            if is_page_number(b, ph, pw_for_filter):
+            if is_page_number(b, page_height, page_width):
                 _removed_count += 1
             else:
                 filtered.append(b)
         blocks = filtered
-    # Determine heading threshold per page
-    # Используем более строгий порог для определения заголовков
+
+    # --- Heading threshold ---
     if blocks:
         sizes_sorted = sorted(b["wsize"] for b in blocks)
-        med = sizes_sorted[len(sizes_sorted)//2]
-        # Увеличиваем порог для более точного определения заголовков
-        # Заголовки должны быть заметно больше обычного текста
-        thr = med * 1.5 + 1.0  # Было: med * 1.35 + 0.5
+        med = sizes_sorted[len(sizes_sorted) // 2]
+        thr = med * 1.5 + 1.0
     else:
+        med = med_size
         thr = 0
 
-    pw = page.rect.width
-    # Classify roles
+    pw = page_width
     for b in blocks:
         x0, y0, x1, y1 = b["bbox"]
         cx = (x0 + x1) / 2
@@ -198,20 +374,15 @@ def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False,
         wide = (x1 - x0) > pw * 0.45
         short = b["line_count"] <= 3 and b["chars"] <= 200
         big_font = b["wsize"] >= thr
-        
-        # Улучшенная логика определения заголовков
+
         is_heading = False
-        
-        # Основной критерий: большой шрифт и короткий текст
         if big_font and short:
             is_heading = True
-        # Дополнительно: центрированный короткий текст (даже если шрифт не намного больше)
         elif centered and short and not wide and b["wsize"] >= med * 1.2:
             is_heading = True
-        # Если текст очень короткий (1-2 слова) и шрифт больше медианы - тоже заголовок
         elif b["chars"] <= 50 and b["line_count"] == 1 and b["wsize"] >= med * 1.3:
             is_heading = True
-        
+
         if is_heading:
             b["role"] = "heading"
         elif poetry and b["line_count"] >= 2:
@@ -223,28 +394,21 @@ def page_blocks_with_roles(page, two_columns=False, keep_page_numbers=False,
         else:
             b["role"] = "paragraph"
         b.pop("raw_text", None)
-    
-    # Sort by reading order
+
+    # --- Sort by reading order ---
     if two_columns:
-        # For two-column layout: first all left column blocks (sorted by Y), then all right column blocks (sorted by Y)
         page_center_x = pw / 2
-        left_blocks = []
-        right_blocks = []
-        for b in blocks:
-            x0, y0, x1, y1 = b["bbox"]
-            block_center_x = (x0 + x1) / 2
-            if block_center_x < page_center_x:
-                left_blocks.append(b)
-            else:
-                right_blocks.append(b)
-        # Sort each column by Y coordinate (top to bottom)
+        left_blocks = [b for b in blocks
+                       if (b["bbox"][0] + b["bbox"][2]) / 2 < page_center_x]
+        right_blocks = [b for b in blocks
+                        if (b["bbox"][0] + b["bbox"][2]) / 2 >= page_center_x]
         left_blocks.sort(key=lambda x: x["bbox"][1])
         right_blocks.sort(key=lambda x: x["bbox"][1])
         blocks = left_blocks + right_blocks
     else:
-        # Default: sort by reading order (top, then left)
         blocks.sort(key=lambda x: (x["bbox"][1], x["bbox"][0]))
-    return blocks, _removed_count
+
+    return blocks, _removed_count, page_footnotes
 
 
 def to_html(blocks, title: str) -> str:
@@ -288,15 +452,22 @@ def main():
 
     doc = fitz.open(pdf_path)
     all_blocks = []
+    all_footnotes: list[dict] = []
     headings_found = []
     page_nums_removed = 0
+    fn_counter = itertools.count(1)
+
     for i in range(len(doc)):
         page = doc.load_page(i)
-        p_blocks, removed = page_blocks_with_roles(
+        p_blocks, removed, p_footnotes = page_blocks_with_roles(
             page, two_columns=args.two_columns,
             keep_page_numbers=args.keep_page_numbers,
-            poetry=args.poetry)
+            poetry=args.poetry,
+            fn_counter=fn_counter)
         page_nums_removed += removed
+        for fn in p_footnotes:
+            fn["page"] = i + 1
+        all_footnotes.extend(p_footnotes)
         for b in p_blocks:
             block_data = {
                 "page": i + 1,
@@ -306,33 +477,35 @@ def main():
                 "bbox": b["bbox"],
             }
             all_blocks.append(block_data)
-            
-            # Сохраняем информацию о заголовках для отладки
             if b["role"] == "heading":
                 headings_found.append({
                     "page": i + 1,
                     "text": b["text"][:50] + ("..." if len(b["text"]) > 50 else ""),
                     "wsize": round(b["wsize"], 1)
                 })
-    
-    # Выводим информацию о найденных заголовках
+
     if getattr(args, 'debug_headings', False):
         print(f"\nНайдено заголовков: {len(headings_found)}")
         for h in headings_found:
             print(f"  Страница {h['page']}: \"{h['text']}\" (размер шрифта: {h['wsize']})")
 
-    # Статистика по номерам страниц
     if page_nums_removed > 0:
         print(f"Удалено номеров страниц: {page_nums_removed}")
     elif not args.keep_page_numbers:
         print("Номера страниц не обнаружены")
 
-    # Save JSON
+    if all_footnotes:
+        print(f"Обнаружено сносок: {len(all_footnotes)}")
+
     struct = {"file": pdf_path.name, "blocks": all_blocks}
+    if all_footnotes:
+        struct["footnotes"] = all_footnotes
     (outdir / "structured.json").write_text(json.dumps(struct, ensure_ascii=False, indent=2), encoding="utf-8")
-    # Save initial HTML/TXT
     (outdir / "structured.html").write_text(to_html(all_blocks, pdf_path.name), encoding="utf-8")
     (outdir / "structured.txt").write_text("\n\n".join(b["text"] for b in all_blocks), encoding="utf-8")
+    if all_footnotes:
+        (outdir / "footnotes.json").write_text(
+            json.dumps(all_footnotes, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Saved: {outdir / 'structured.json'}")
     print(f"Saved: {outdir / 'structured.html'}")
     print(f"Saved: {outdir / 'structured.txt'}")

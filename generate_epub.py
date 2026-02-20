@@ -103,25 +103,34 @@ def is_page_number(text: str) -> bool:
 
 
 def load_blocks_from_json(json_path: Path):
-    """Загрузить блоки из JSON файла (structured.json или structured_rules.json)
-    
-    Автоматически фильтрует номера страниц (маленькие числа внизу страницы).
+    """Загрузить блоки (и сноски) из JSON файла.
+
+    Returns:
+        (blocks, footnotes) — footnotes может быть пустым списком.
     """
     data = json.loads(json_path.read_text(encoding="utf-8"))
     blocks = data.get("blocks", [])
-    
-    # Фильтруем номера страниц
+    footnotes = data.get("footnotes", [])
+
     filtered_blocks = []
     for block in blocks:
         text = block.get("text", "").strip()
         if not text:
             continue
-        # Пропускаем номера страниц (маленькие числа внизу страницы - не метки глав!)
         if is_page_number(text):
             continue
         filtered_blocks.append(block)
-    
-    return filtered_blocks
+
+    # Fallback: load footnotes.json from the same directory
+    if not footnotes:
+        fn_path = json_path.parent / "footnotes.json"
+        if fn_path.exists():
+            try:
+                footnotes = json.loads(fn_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                footnotes = []
+
+    return filtered_blocks, footnotes
 
 
 def looks_like_section_heading(line: str) -> bool:
@@ -736,47 +745,79 @@ def generate_cover_image(
     return img_bytes.getvalue()
 
 
-def create_xhtml_section(blocks, title, css_href="../Styles/Style0001.css", book_title=""):
-    """Создать XHTML файл для раздела - БЕЗ фильтрации, добавляем все блоки.
-    
+_FN_MARKER_RE = re.compile(r"\{\{fn:(\d+)\}\}")
+
+
+def _render_fn_markers(text_escaped: str) -> tuple[str, list[int]]:
+    """Заменяет {{fn:N}} на EPUB3 noteref-ссылки. Возвращает (html, [найденные id])."""
+    found_ids = []
+
+    def _repl(m):
+        fn_id = int(m.group(1))
+        found_ids.append(fn_id)
+        return (f'<sup><a epub:type="noteref" id="fnref-{fn_id}" '
+                f'href="#fn-{fn_id}">{fn_id}</a></sup>')
+
+    html = _FN_MARKER_RE.sub(_repl, text_escaped)
+    return html, found_ids
+
+
+def create_xhtml_section(blocks, title, css_href="../Styles/Style0001.css",
+                         book_title="", footnotes=None):
+    """Создать XHTML файл для раздела.
+
     Args:
-        blocks: список блоков текста
-        title: заголовок секции (для отладки)
-        css_href: путь к CSS
-        book_title: название книги для тега <title> (если пустой, используется title)
+        footnotes: список словарей {"id": N, "marker": "N", "text": "..."}.
     """
+    fn_map = {fn["id"]: fn for fn in (footnotes or [])}
+    section_fn_ids: list[int] = []
+
     body_parts = []
     blocks_added = 0
     blocks_skipped = 0
-    
+
     for block in blocks:
         text = block.get("text", "").strip()
-        # Пропускаем только полностью пустые блоки
         if not text:
             blocks_skipped += 1
             continue
-        
+
         text_escaped = hesc(text)
+        text_html, ids = _render_fn_markers(text_escaped)
+        section_fn_ids.extend(ids)
+
         if block.get("role") == "heading":
-            body_parts.append(f"<h2>{text_escaped}</h2>")
+            body_parts.append(f"<h2>{text_html}</h2>")
         elif block.get("role") == "verse":
-            stanzas = text_escaped.split("\n\n")
+            stanzas = text_html.split("\n\n")
             for stanza in stanzas:
                 lines = stanza.split("\n")
                 body_parts.append(
                     '<div class="stanza"><p>' + "<br/>".join(lines) + "</p></div>"
                 )
         else:
-            body_parts.append(f"<p>{text_escaped}</p>")
+            body_parts.append(f"<p>{text_html}</p>")
         blocks_added += 1
-    
-    # Отладочная информация
+
+    # Append footnote asides at the end of the section
+    if section_fn_ids and fn_map:
+        body_parts.append('<aside class="footnotes">')
+        for fn_id in section_fn_ids:
+            fn = fn_map.get(fn_id)
+            if fn:
+                body_text = hesc(fn.get("text", ""))
+                body_parts.append(
+                    f'<aside epub:type="footnote" id="fn-{fn_id}">'
+                    f'<p><a href="#fnref-{fn_id}">{fn_id}</a>. {body_text}</p>'
+                    f'</aside>'
+                )
+        body_parts.append('</aside>')
+
     if blocks_skipped > 0 or blocks_added != len(blocks):
         print(f"   create_xhtml_section '{title[:30]}...': добавлено {blocks_added} блоков, пропущено {blocks_skipped} из {len(blocks)}")
-    
-    # В <title> вставляем название книги, а не заголовок секции
+
     html_title = book_title if book_title else title
-    
+
     xhtml = f'''<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 
@@ -790,7 +831,7 @@ def create_xhtml_section(blocks, title, css_href="../Styles/Style0001.css", book
 {chr(10).join(body_parts)}
 </body>
 </html>'''
-    
+
     return xhtml
 
 
@@ -981,13 +1022,9 @@ def generate_epub(
     cover_colors: list[str] | None = None,
     max_chapter_size_kb: int = 50,
     use_chapter_heads: bool = False,
+    footnotes: list[dict] | None = None,
 ):
-    """Генерировать EPUB на основе шаблона и блоков текста
-    
-    Args:
-        use_chapter_heads: Если True, использует поиск заголовков для разделения на главы.
-                          Если False, просто разбивает по размеру на секции.
-    """
+    """Генерировать EPUB на основе шаблона и блоков текста."""
     
     # Разбиваем на разделы
     print(f"\n📖 Разбиение на части:")
@@ -1074,8 +1111,17 @@ def generate_epub(
         if styles_path.exists():
             for css_file in styles_path.glob("*.css"):
                 css_text = css_file.read_text(encoding="utf-8")
+                changed = False
                 if ".stanza" not in css_text:
                     css_text += "\n.stanza { margin: 0.8em 2em; }\n.stanza p { text-indent: 0; }\n"
+                    changed = True
+                if ".footnotes" not in css_text:
+                    css_text += (
+                        "\n.footnotes { margin-top: 2em; border-top: 1px solid #ccc; padding-top: 0.5em; font-size: 0.85em; }\n"
+                        ".footnotes aside { margin: 0.3em 0; }\n"
+                    )
+                    changed = True
+                if changed:
                     css_file.write_text(css_text, encoding="utf-8")
         
         # Удаляем старые Section и Chapter файлы
@@ -1115,7 +1161,9 @@ def generate_epub(
             section_title = chapter.get("title") or title
             
             # Проверяем размер XHTML перед записью
-            xhtml_content = create_xhtml_section(filtered_blocks, section_title, book_title=title)
+            xhtml_content = create_xhtml_section(
+                filtered_blocks, section_title, book_title=title,
+                footnotes=footnotes)
             xhtml_size = len(xhtml_content.encode("utf-8"))
             
             section_file = text_path / section_id
@@ -1520,10 +1568,11 @@ def main():
         print(f"Ошибка: входной файл не найден: {input_file}")
         return 1
     
-    # Загружаем блоки
+    # Загружаем блоки и сноски
+    footnotes = []
     suffix = input_file.suffix.lower()
     if suffix == ".json":
-        blocks = load_blocks_from_json(input_file)
+        blocks, footnotes = load_blocks_from_json(input_file)
     elif suffix in (".html", ".htm"):
         blocks = load_blocks_from_html(input_file)
     elif suffix == ".txt":
@@ -1533,6 +1582,15 @@ def main():
         print(f"Ошибка: неподдерживаемый формат входного файла: {input_file.suffix}")
         print("Поддерживаются: .json, .html, .htm")
         return 1
+
+    # Fallback: footnotes.json рядом с входным файлом
+    if not footnotes:
+        fn_path = input_file.parent / "footnotes.json"
+        if fn_path.exists():
+            try:
+                footnotes = json.loads(fn_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
     
     if not blocks:
         print("Ошибка: не найдено блоков текста")
@@ -1570,6 +1628,8 @@ def main():
     stats = f"Блоков-заголовков: {heading_count}, блоков-абзацев: {paragraph_count}"
     if verse_count:
         stats += f", блоков-стихов: {verse_count}"
+    if footnotes:
+        stats += f", сносок: {len(footnotes)}"
     print(stats)
     
     cover_colors = None
@@ -1589,6 +1649,7 @@ def main():
         cover_colors=cover_colors,
         max_chapter_size_kb=args.max_chapter_size,
         use_chapter_heads=args.use_chapter_heads,
+        footnotes=footnotes,
     )
     
     # Валидация EPUB через epubcheck

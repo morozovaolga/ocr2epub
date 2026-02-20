@@ -1,5 +1,5 @@
 """
-OCR-движок с поддержкой нескольких бэкендов и автоматическим фоллбэком.
+OCR-движок с поддержкой нескольких бэкендов, автоматическим фоллбэком и детекцией сносок.
 
 Поддерживаемые движки:
   - pymupdf  — извлечение встроенного текстового слоя (по умолчанию, быстро)
@@ -12,6 +12,7 @@ OCR-движок с поддержкой нескольких бэкендов �
   python ocr_engine.py --pdf book.pdf --outdir out --engine auto --dpi 300
 """
 import argparse
+import itertools
 import json
 import os
 import re
@@ -91,39 +92,114 @@ def render_page(doc, page_idx: int, dpi: int = 300) -> np.ndarray:
 # PyMuPDF: извлечение встроенного текстового слоя
 # ---------------------------------------------------------------------------
 
-def _ocr_pymupdf_page(doc, page_idx: int, poetry: bool = False) -> list[dict]:
-    """Извлекает блоки текста из встроенного слоя PDF."""
+def _ocr_pymupdf_page(
+    doc, page_idx: int, poetry: bool = False,
+    fn_counter=None,
+) -> tuple[list[dict], list[dict]]:
+    """Извлекает блоки текста из встроенного слоя PDF.
+
+    Returns:
+        (blocks, page_footnotes)
+    """
     page = doc[page_idx]
     d = page.get_text("dict")
-    blocks = []
-    for b in d.get("blocks", []):
-        if b.get("type", 0) != 0:
-            continue
+    page_height = page.rect.height
+
+    raw_blocks = [b for b in d.get("blocks", []) if b.get("type", 0) == 0]
+
+    # --- Phase 1: basic info ---
+    block_infos: list[dict] = []
+    for b in raw_blocks:
         lines = b.get("lines", [])
-        line_pairs = []
         total_chars = 0
         wsum = 0.0
         for ln in lines:
-            spans = ln.get("spans", [])
-            txt = "".join(sp.get("text", "") for sp in spans)
-            x0 = ln.get("bbox", [0])[0]
-            line_pairs.append((txt, x0))
-            for sp in spans:
+            for sp in ln.get("spans", []):
                 s = sp.get("size", 0)
                 t = sp.get("text", "") or ""
                 n = len(t)
                 if n and s:
                     wsum += s * n
                     total_chars += n
+        if total_chars == 0:
+            continue
+        wsize = wsum / total_chars
+        block_infos.append({
+            "raw": b, "wsize": wsize,
+            "chars": total_chars, "line_count": len(lines),
+        })
+
+    if not block_infos:
+        return [], []
+
+    all_wsizes = sorted(bi["wsize"] for bi in block_infos)
+    med_size = all_wsizes[len(all_wsizes) // 2]
+
+    # --- Phase 2: footnote bodies ---
+    fn_body_indices: set[int] = set()
+    fn_id_map: dict[str, int] = {}
+    page_footnotes: list[dict] = []
+
+    if fn_counter is not None:
+        per_page_fn: dict[str, str] = {}
+        for idx, bi in enumerate(block_infos):
+            if _is_footnote_body_block(bi["raw"], page_height, med_size):
+                for marker, text in _parse_footnote_block(bi["raw"]):
+                    per_page_fn[marker] = text
+                fn_body_indices.add(idx)
+        for marker in sorted(per_page_fn, key=lambda m: int(m) if m.isdigit() else 0):
+            gid = next(fn_counter)
+            fn_id_map[marker] = gid
+            page_footnotes.append({
+                "id": gid, "marker": str(gid),
+                "text": per_page_fn[marker],
+            })
+
+    # --- Phase 3: extract text for non-footnote blocks ---
+    blocks = []
+    for idx, bi in enumerate(block_infos):
+        if idx in fn_body_indices:
+            continue
+        raw = bi["raw"]
+        lines = raw.get("lines", [])
+
+        # Build line texts with optional footnote marker replacement
+        # Median font size for this block (for fallback superscript detection)
+        block_sizes: list[float] = []
+        for ln in lines:
+            for sp in ln.get("spans", []):
+                s = sp.get("size", 0)
+                n = len(sp.get("text", ""))
+                if s and n:
+                    block_sizes.extend([s] * n)
+        block_sizes.sort()
+        block_med = block_sizes[len(block_sizes) // 2] if block_sizes else 0
+
+        line_pairs = []
+        for ln in lines:
+            spans = ln.get("spans", [])
+            if fn_id_map:
+                parts = []
+                for sp in spans:
+                    txt_sp = sp.get("text", "")
+                    m_key = txt_sp.strip()
+                    if _is_superscript_digit(sp, block_med) and m_key in fn_id_map:
+                        parts.append(f"{{{{fn:{fn_id_map[m_key]}}}}}")
+                    else:
+                        parts.append(txt_sp)
+                txt = "".join(parts)
+            else:
+                txt = "".join(sp.get("text", "") for sp in spans)
+            x0 = ln.get("bbox", [0])[0]
+            line_pairs.append((txt, x0))
+
         text = "\n".join(t for t, _ in line_pairs)
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         if poetry:
             out = []
             for txt, _ in line_pairs:
                 txt = re.sub(r"[ \t]{2,}", " ", txt).strip()
-                if not txt:
-                    continue
-                if _is_junk_block(txt):
+                if not txt or _is_junk_block(txt):
                     continue
                 out.append(txt)
             text = "\n".join(out)
@@ -132,17 +208,16 @@ def _ocr_pymupdf_page(doc, page_idx: int, poetry: bool = False) -> list[dict]:
             text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
             text = re.sub(r"[ \t]{2,}", " ", text)
             text = text.strip()
-        if not text or total_chars == 0:
+        if not text or bi["chars"] == 0:
             continue
-        wsize = wsum / total_chars if total_chars else 0
         blocks.append({
-            "bbox": list(b.get("bbox", [0, 0, 0, 0])),
+            "bbox": list(raw.get("bbox", [0, 0, 0, 0])),
             "text": text,
-            "wsize": round(wsize, 2),
-            "line_count": len(lines),
-            "chars": total_chars,
+            "wsize": round(bi["wsize"], 2),
+            "line_count": bi["line_count"],
+            "chars": bi["chars"],
         })
-    return blocks
+    return blocks, page_footnotes
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +402,74 @@ def _is_page_number(block: dict, page_height: float) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Footnote detection (PyMuPDF path)
+# ---------------------------------------------------------------------------
+
+def _is_footnote_body_block(raw_block, page_height: float, med_size: float) -> bool:
+    """Блок-тело сноски: внизу страницы, мелкий шрифт, начинается с цифры."""
+    bbox = raw_block.get("bbox", [0, 0, 0, 0])
+    if bbox[1] < page_height * 0.65:
+        return False
+    lines = raw_block.get("lines", [])
+    total_chars = 0
+    wsum = 0.0
+    for ln in lines:
+        for sp in ln.get("spans", []):
+            s = sp.get("size", 0)
+            t = sp.get("text", "") or ""
+            n = len(t)
+            if n and s:
+                wsum += s * n
+                total_chars += n
+    if total_chars == 0:
+        return False
+    if (wsum / total_chars) >= med_size * 0.92:
+        return False
+    full = "".join(
+        sp.get("text", "") for ln in lines for sp in ln.get("spans", [])
+    ).strip()
+    return bool(full and re.match(r"^\d", full))
+
+
+def _parse_footnote_block(raw_block) -> list[tuple[str, str]]:
+    """Разбирает блок сносок на пары (маркер, текст)."""
+    full_text = ""
+    for ln in raw_block.get("lines", []):
+        full_text += "".join(sp.get("text", "") for sp in ln.get("spans", [])) + "\n"
+    footnotes: list[tuple[str, str]] = []
+    cur_marker = None
+    cur_lines: list[str] = []
+    for line in full_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"^(\d+)\s*[.)]*\s+(.*)", line)
+        if m:
+            if cur_marker is not None:
+                footnotes.append((cur_marker, " ".join(cur_lines).strip()))
+            cur_marker = m.group(1)
+            cur_lines = [m.group(2)] if m.group(2) else []
+        elif cur_marker is not None:
+            cur_lines.append(line)
+    if cur_marker is not None:
+        footnotes.append((cur_marker, " ".join(cur_lines).strip()))
+    return footnotes
+
+
+def _is_superscript_digit(span, block_med_size: float = 0) -> bool:
+    """Superscript-цифра: флаг или уменьшенный шрифт."""
+    text = span.get("text", "").strip()
+    if not text or not re.fullmatch(r"\d{1,3}", text):
+        return False
+    if span.get("flags", 0) & 1:
+        return True
+    sz = span.get("size", 0)
+    if block_med_size > 0 and sz > 0 and sz < block_med_size * 0.85:
+        return True
+    return False
+
+
 def ocr_pdf(
     pdf_path: str,
     engine: str = "auto",
@@ -357,22 +500,28 @@ def ocr_pdf(
 
     scale = dpi / 72
     all_blocks = []
+    all_footnotes: list[dict] = []
     ocr_used_pages = 0
+    fn_counter = itertools.count(1)
 
     for page_idx in page_indices:
         page_num = page_idx + 1
+        page_footnotes: list[dict] = []
 
         if engine == "auto":
-            blocks = _ocr_pymupdf_page(doc, page_idx, poetry=poetry)
+            blocks, page_footnotes = _ocr_pymupdf_page(
+                doc, page_idx, poetry=poetry, fn_counter=fn_counter)
             text_len = sum(b["chars"] for b in blocks)
             if text_len < MIN_CHARS_PER_PAGE:
                 fallback = _pick_best_engine()
                 if fallback:
                     img = render_page(doc, page_idx, dpi)
                     blocks = OCR_FUNCS[fallback](img, scale)
+                    page_footnotes = []
                     ocr_used_pages += 1
         elif engine == "pymupdf":
-            blocks = _ocr_pymupdf_page(doc, page_idx, poetry=poetry)
+            blocks, page_footnotes = _ocr_pymupdf_page(
+                doc, page_idx, poetry=poetry, fn_counter=fn_counter)
         else:
             if engine not in OCR_FUNCS:
                 raise ValueError(f"Неизвестный OCR-движок: {engine}. "
@@ -383,6 +532,10 @@ def ocr_pdf(
             img = render_page(doc, page_idx, dpi)
             blocks = OCR_FUNCS[engine](img, scale)
             ocr_used_pages += 1
+
+        for fn in page_footnotes:
+            fn["page"] = page_num
+        all_footnotes.extend(page_footnotes)
 
         if two_columns:
             pw = doc[page_idx].rect.width
@@ -415,11 +568,16 @@ def ocr_pdf(
 
     if ocr_used_pages:
         print(f"OCR применён к {ocr_used_pages} из {len(page_indices)} страниц")
+    if all_footnotes:
+        print(f"Обнаружено сносок: {len(all_footnotes)}")
 
-    return {
+    result = {
         "file": Path(pdf_path).name,
         "blocks": all_blocks,
     }
+    if all_footnotes:
+        result["footnotes"] = all_footnotes
+    return result
 
 
 def _pick_best_engine() -> str | None:
@@ -480,6 +638,13 @@ def main():
         "\n\n".join(b["text"] for b in result["blocks"]),
         encoding="utf-8",
     )
+    if result.get("footnotes"):
+        fn_path = outdir / "footnotes.json"
+        fn_path.write_text(
+            json.dumps(result["footnotes"], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"Сохранено: {fn_path}")
     print(f"Сохранено: {json_path}")
     print(f"Сохранено: {txt_path}")
 
