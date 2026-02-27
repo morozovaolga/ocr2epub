@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from datetime import datetime
 
 # Принудительно UTF-8 на Windows
 if sys.platform == 'win32':
@@ -68,6 +69,19 @@ def main():
     parser.add_argument('--title', required=True, help='Название книги')
     parser.add_argument('--author', default='', help='Автор книги')
     parser.add_argument('--html', action='store_true', help='Генерировать промежуточные HTML-файлы для ручной проверки в браузере')
+    parser.add_argument(
+        '--profile',
+        default='',
+        choices=['', 'prose', 'scan-old', 'poetry', 'fast'],
+        help='Профиль качества: выставляет рекомендуемые флаги по умолчанию (их можно переопределять явно)',
+    )
+    parser.add_argument(
+        '--quality-report',
+        nargs='?',
+        const='quality_report.md',
+        default='',
+        help='Если указан, сохраняет отчёт о прогоне (по умолчанию: out/quality_report.md). Можно указать имя файла.',
+    )
     
     # Этап 0: Предобработка PDF (опционально, перед OCR)
     parser.add_argument('--preprocess', action='store_true', help='Предобработка PDF: выравнивание, шумодав, контраст (перед OCR)')
@@ -115,6 +129,12 @@ def main():
     parser.add_argument('--llm-cautious', action='store_true', help='Осторожный режим LLM: не менять сомнительные слова, а вынести их в doubt_words.txt')
     parser.add_argument('--llm-old-russian', action='store_true', help='Режим для старорусских/древнерусских текстов: агрессивная склейка разорванных слов, сохранение архаизмов')
     parser.add_argument('--llm-user-context', default='', help='Дополнительный контекст для LLM (напр. "Текст из «Хождения за три моря» XV века")')
+    parser.add_argument('--llm-overlap-chars', type=int, default=0, help='Нахлёст для LLM: хвост предыдущего чанка (символы) как read-only контекст (по умолчанию: 0)')
+    parser.add_argument('--llm-overlap-paragraphs', type=int, default=0, help='Нахлёст для LLM по абзацам (предпочтительнее символов, по умолчанию: 0)')
+    parser.add_argument('--llm-book-memory', action='store_true', help='LLM: включить “память книги” (подтягивать похожие места из других частей текста для согласованности имён/терминов)')
+    parser.add_argument('--llm-memory-topk', type=int, default=3, help='LLM память книги: сколько похожих фрагментов добавлять (по умолчанию: 3)')
+    parser.add_argument('--llm-memory-exclude-window', type=int, default=20, help='LLM память книги: исключать абзацы рядом с текущим чанком (по обе стороны, по умолчанию: 20)')
+    parser.add_argument('--llm-memory-max-chars', type=int, default=1200, help='LLM память книги: лимит на объём retrieval-контекста (символы, по умолчанию: 1200)')
     
     # Этап 7: Контекстная проверка (опционально)
     parser.add_argument('--context-check', action='store_true', help='Контекстная проверка (местоимение+глагол)')
@@ -138,6 +158,45 @@ def main():
     parser.add_argument('--natasha-sync-report', default='natasha_sync.txt', help='Файл отчета Natasha синхронизации')
     
     args = parser.parse_args()
+
+    argv = set(sys.argv[1:])
+    def _has_any(*flags: str) -> bool:
+        return any(f in argv for f in flags)
+    def _set_default(attr: str, value, *flags: str):
+        if not _has_any(*flags):
+            setattr(args, attr, value)
+
+    # Профили качества (ставим только если пользователь не задавал флаги явно)
+    if args.profile == 'fast':
+        _set_default('llm_correct', False, '--llm-correct')
+        _set_default('lt_cloud', False, '--lt-cloud')
+        _set_default('yandex_speller', False, '--yandex-speller')
+        _set_default('post_clean', False, '--post-clean')
+        _set_default('natasha_sync', False, '--natasha-sync')
+    elif args.profile == 'poetry':
+        _set_default('poetry', True, '--poetry')
+        _set_default('llm_correct', False, '--llm-correct')
+        _set_default('post_clean', True, '--post-clean')
+    elif args.profile == 'scan-old':
+        _set_default('preprocess', True, '--preprocess')
+        _set_default('ocr_engine', 'easyocr', '--ocr-engine')
+        _set_default('llm_correct', True, '--llm-correct')
+        _set_default('llm_old_russian', True, '--llm-old-russian')
+        _set_default('llm_chunk_size', 4500, '--llm-chunk-size')
+        _set_default('llm_overlap_paragraphs', 1, '--llm-overlap-paragraphs')
+        _set_default('post_clean', True, '--post-clean')
+        _set_default('natasha_sync', True, '--natasha-sync')
+    elif args.profile == 'prose':
+        _set_default('lt_cloud', True, '--lt-cloud')
+        _set_default('yandex_speller', True, '--yandex-speller')
+        _set_default('llm_correct', True, '--llm-correct')
+        _set_default('llm_chunk_size', 5000, '--llm-chunk-size')
+        _set_default('llm_overlap_paragraphs', 1, '--llm-overlap-paragraphs')
+        _set_default('llm_book_memory', True, '--llm-book-memory')
+        _set_default('llm_memory_topk', 3, '--llm-memory-topk')
+        _set_default('llm_memory_exclude_window', 30, '--llm-memory-exclude-window')
+        _set_default('post_clean', True, '--post-clean')
+        _set_default('natasha_sync', True, '--natasha-sync')
     
     here = Path(__file__).parent
     outdir = Path(args.outdir)
@@ -343,6 +402,7 @@ def main():
                 "--outdir", str(outdir),
                 "--title", args.title + " (LT)",
                 "--chunk-size", str(args.chunk_size),
+                "--stats-json", str(outdir / "lt_stats.json"),
             ]
             if args.yandex_speller:
                 lt_cmd.append("--yandex-speller")
@@ -371,6 +431,7 @@ def main():
                 "--outdir", str(outdir),
                 "--title", args.title + " (LLM)",
                 "--chunk-size", str(args.llm_chunk_size),
+                "--stats-json", str(outdir / "llm_stats.json"),
             ]
             if args.llm_model:
                 llm_cmd.extend(["--model", args.llm_model])
@@ -382,6 +443,15 @@ def main():
                 llm_cmd.append("--old-russian")
             if args.llm_user_context:
                 llm_cmd.extend(["--user-context", args.llm_user_context])
+            if args.llm_overlap_chars and args.llm_overlap_chars > 0:
+                llm_cmd.extend(["--overlap-chars", str(args.llm_overlap_chars)])
+            if args.llm_overlap_paragraphs and args.llm_overlap_paragraphs > 0:
+                llm_cmd.extend(["--overlap-paragraphs", str(args.llm_overlap_paragraphs)])
+            if args.llm_book_memory:
+                llm_cmd.append("--book-memory")
+                llm_cmd.extend(["--memory-topk", str(args.llm_memory_topk)])
+                llm_cmd.extend(["--memory-exclude-window", str(args.llm_memory_exclude_window)])
+                llm_cmd.extend(["--memory-max-chars", str(args.llm_memory_max_chars)])
             if not run_cmd(llm_cmd, f"Этап 6: LLM-коррекция (GigaChat)"):
                 return 1
             
@@ -629,6 +699,7 @@ def main():
                     "--out", str(output_epub),
                     "--title", args.title,
                     "--max-chapter-size", str(args.epub_max_chapter_size),
+                    "--epubcheck-json", str(outdir / "epubcheck_report.json"),
                 ]
                 if args.author:
                     epub_cmd.extend(["--author", args.author])
@@ -659,6 +730,113 @@ def main():
     print("✅ ОБРАБОТКА ЗАВЕРШЕНА")
     print("=" * 80)
     print(f"Результаты в папке: {outdir}")
+
+    # Отчёт качества (опционально)
+    if args.quality_report:
+        try:
+            rep_path = Path(args.quality_report)
+            if not rep_path.is_absolute():
+                rep_path = outdir / rep_path
+
+            def _read_json(p: Path):
+                if not p.exists():
+                    return None
+                try:
+                    return json.loads(p.read_text(encoding="utf-8"))
+                except Exception:
+                    return None
+
+            lt_stats = _read_json(outdir / "lt_stats.json")
+            llm_stats = _read_json(outdir / "llm_stats.json")
+            epubcheck = _read_json(outdir / "epubcheck_report.json")
+
+            # Natasha sync report
+            natasha_report_path = Path(args.natasha_sync_report)
+            if not natasha_report_path.is_absolute():
+                natasha_report_path = outdir / natasha_report_path
+            natasha_report = natasha_report_path.read_text(encoding="utf-8", errors="ignore") if natasha_report_path.exists() else ""
+
+            # Doubt words
+            doubt_path = outdir / "doubt_words.txt"
+            doubts_count = 0
+            if doubt_path.exists():
+                txt = doubt_path.read_text(encoding="utf-8", errors="ignore")
+                doubts_count = len([l for l in txt.splitlines() if l.strip() and not l.strip().startswith("=")])
+
+            # Итоговые файлы
+            final_candidates = [
+                outdir / "final_better.txt",
+                outdir / "final_llm.txt",
+                outdir / "final_clean.txt",
+                outdir / "final.txt",
+            ]
+            final_path = next((p for p in final_candidates if p.exists()), None)
+            final_chars = final_path.stat().st_size if final_path else 0
+
+            lines = []
+            lines.append(f"# OCR2EPUB — отчёт качества\n")
+            lines.append(f"- Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(f"- PDF: `{args.pdf}`")
+            lines.append(f"- Профиль: `{args.profile or '—'}`")
+            lines.append(f"- Выход: `{outdir}`\n")
+
+            lines.append("## Использованные этапы")
+            lines.append(f"- OCR engine: `{getattr(args, 'ocr_engine', 'auto')}`")
+            lines.append(f"- LanguageTool: `{bool(args.lt_cloud)}`")
+            lines.append(f"- Yandex.Speller: `{bool(args.yandex_speller)}`")
+            lines.append(f"- LLM: `{bool(args.llm_correct)}`")
+            lines.append(f"- Post-clean: `{bool(args.post_clean)}`")
+            lines.append(f"- Natasha sync: `{bool(args.natasha_sync)}`\n")
+
+            lines.append("## Метрики")
+            if epubcheck:
+                valid = epubcheck.get("valid", None)
+                status = epubcheck.get("status", "unknown")
+                errs = epubcheck.get("errors", 0)
+                warns = epubcheck.get("warnings", 0)
+                lines.append(f"- EPUBCheck: статус `{status}`, valid=`{valid}`, **{errs} ошибок**, **{warns} предупреждений**")
+                msgs = epubcheck.get("messages") or []
+                if msgs and (errs or warns):
+                    lines.append("  - Примеры сообщений:")
+                    for m in msgs[:8]:
+                        lvl = m.get("level", "INFO")
+                        msg = m.get("message", "")
+                        loc = m.get("location", "")
+                        loc_part = f" ({loc})" if loc else ""
+                        lines.append(f"    - `{lvl}` {msg}{loc_part}")
+            if lt_stats:
+                lines.append(f"- LT исправлений: **{lt_stats.get('applied_total', 0)}**")
+                lines.append(f"  - По чекерам: `{lt_stats.get('applied_by_checker', {})}`")
+            if llm_stats:
+                lines.append(f"- LLM чанков: **{llm_stats.get('chunks', llm_stats.get('chunks', 0))}**")
+                lines.append(f"- LLM токены: `{llm_stats.get('input_tokens', 0)} in + {llm_stats.get('output_tokens', 0)} out`")
+                lines.append(f"- LLM overlap: `{llm_stats.get('overlap_paragraphs', 0)} параграфов / {llm_stats.get('overlap_chars', 0)} символов`")
+                lines.append(f"- LLM book-memory: `{bool(llm_stats.get('book_memory'))}` (topk={llm_stats.get('memory_topk')})")
+                lines.append(f"- Сомнений (doubt_words): **{llm_stats.get('doubts_count', doubts_count)}**")
+            else:
+                lines.append(f"- Сомнений (doubt_words): **{doubts_count}**")
+            if final_path:
+                lines.append(f"- Итоговый текст: `{final_path.name}` ({final_chars} байт)")
+            lines.append("")
+
+            if natasha_report.strip():
+                lines.append("## Natasha sync (выдержка)")
+                # Не раздуваем отчёт
+                nat_lines = natasha_report.strip().splitlines()
+                lines.extend(nat_lines[:50])
+                if len(nat_lines) > 50:
+                    lines.append("... (обрезано) ...")
+                lines.append("")
+
+            lines.append("## Рекомендации")
+            lines.append("- Для прозы обычно лучше: `--llm-overlap-paragraphs 1` и `--llm-book-memory`.")
+            lines.append("- Если качество падает по мере текста: уменьшайте `--llm-chunk-size` до 4000–5500.")
+            lines.append("- Для контроля вёрстки: всегда проверяйте EPUB в 2–3 читалках + `epubcheck`.\n")
+
+            rep_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            print(f"📝 Отчёт качества сохранён: {rep_path}")
+        except Exception as exc:
+            print(f"⚠️  Не удалось создать quality-report: {exc}")
     
     # Показываем созданные файлы
     show_patterns = ["*.txt", "*.json", "*.epub"]

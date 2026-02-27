@@ -8,7 +8,7 @@
               (файлы и трансформации в папке out/)
 ═══════════════════════════════════════════════════════════════════════
 
-  book.pdf                          ← исходный грязный скан
+  book.pdf                          ← исходный PDF (скан или с текстом)
     │
     ▼
 ┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐
@@ -18,16 +18,21 @@
   book.pdf ──→ book_preprocessed.pdf
 └─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘
     │
-    ▼  ← FineReader OCR (внешний, вне пайплайна)
+    ▼  ← Рекомендуется: FineReader OCR (внешний, вне пайплайна)
     │
     ▼
 ┌───────────────────────────────────────────────────────────┐
-│ ЭТАП 1  extract_structured_text.py  (обязательно)        │
-│ [PyMuPDF: извлечение блоков текста]                      │
+│ ЭТАП 1  ocr_engine.py              (обязательно)         │
+│ [PyMuPDF (текстовый слой) + OCR-фоллбэк]                │
+│  Движки: auto, pymupdf, easyocr, tesseract, doctr        │
+│  --poetry: сохранение строк/строф для стихов              │
+│  Автодетекция: сноски, номера страниц, заголовки          │
 │                                                           │
-│ book.pdf ──→ structured.json                              │
-│              structured.html                              │
+│ book.pdf ──→ structured.json       (блоки + сноски)       │
 │              structured.txt                               │
+│              footnotes.json        (если есть сноски)      │
+│                                                           │
+│ Альтернативно: extract_structured_text.py (только PyMuPDF)│
 └───────────────────────────────────────────────────────────┘
     │
     ▼
@@ -50,8 +55,12 @@
 ┌───────────────────────────────────────────────────────────┐
 │ ЭТАП 4  modernize_structured.py     (обязательно)        │
 │ [Модернизация: ять→е, ъ, i→и, ...]                      │
+│ Нормализует текст сносок, сохраняет роли (verse/paragraph)│
 │                                                           │
-│ structured_*.json ──→ final.txt      ◄── ФОРМАТ: JSON→TXT│
+│ structured_*.json ──→ final.txt     ◄── JSON→TXT         │
+│                       final_structured.json (если стихи   │
+│                                      или сноски)          │
+│                       footnotes.json (если есть сноски)    │
 └───────────────────────────────────────────────────────────┘
     │
     ▼
@@ -60,15 +69,20 @@
   [LanguageTool + Yandex.Speller]
 │                                                           │
   final.txt ──→ final_clean.txt
+              lt_stats.json          (статистика: сколько правок)
 └─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘
     │
     ▼
 ┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐
   ЭТАП 6  llm_correction.py           (опционально)
   [GigaChat: исправление OCR-ошибок по контексту]
+  Опции качества:
+    - overlap: хвост предыдущего чанка как read-only контекст
+    - book-memory: поиск похожих мест по книге (SQLite FTS5) для согласованности имён/терминов
 │                                                           │
   final_clean.txt ──→ final_llm.txt
   (или final.txt, если этап 5 пропущен)
+              llm_stats.json         (статистика: токены, чанки, сомнения)
 └─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘
     │
     ├──────────────────────────────────────────────┐
@@ -83,6 +97,7 @@
 ┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐
   ЭТАП 8  post_cleanup.py             (опционально)
   [Склейка букв, латиница→кириллица, OCR-ошибки]
+  --preserve-newlines при --poetry
 │                                                           │
   final_llm.txt ──→ final_better.txt
   (или лучший доступный .txt)
@@ -93,17 +108,24 @@
     │  ┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐
     │    NATASHA  natasha_sync.py       (опционально)
     │    [Проверка/синхронизация имён собственных]
+    │    Синхронизация выполняется точечно по спанам Natasha,
+    │    с подбором формы из PDF по похожести (меньше риск сломать падеж).
     │  │                                                   │
     │    best_txt + book.pdf ──→ natasha_diff.txt
     │                             natasha_sync.txt
     │  └─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘
     ▼
-┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐
-  ЭТАП 9  generate_epub.py            (опционально)
-  [Разбиение на главы, обложка, оглавление]
+┌───────────────────────────────────────────────────────────┐
+│ ЭТАП 9  generate_epub.py            (опционально)        │
+│ [Разбиение на главы, обложка, оглавление]                │
+│ Сноски: {{fn:N}} → <sup><a noteref> + <aside footnote>    │
+│ Стихи: <div class="stanza"> + <br/> для строк             │
+│ Проза: каждый абзац → <p>...</p> (абзацы по пустым строкам;
+│        fallback: если пустых строк нет — по отступу первой строки в TXT)
 │                                                           │
-  лучший .txt ──→ Название_книги.epub
-└─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘
+│ лучший источник ──→ Название_книги.epub                   │
+│                   epubcheck_report.json (валидность, ошибки/предупр.)
+└───────────────────────────────────────────────────────────┘
 ```
 
 ## Цепочка файлов при полном пайплайне
@@ -111,14 +133,20 @@
 ```
 book.pdf
   → book_preprocessed.pdf           (этап 0, изображения)
-    → structured.json                (этап 1, JSON с блоками)
+    → structured.json                (этап 1, блоки + сноски)
+      → footnotes.json               (этап 1, сноски отдельно)
       → structured_rules.json        (этап 2, JSON)
         → structured_tokenized.json  (этап 3, JSON)
-          → final.txt                (этап 4, JSON→TXT !!!)
+          → final.txt                (этап 4, JSON→TXT)
+          → final_structured.json    (этап 4, JSON с ролями и сносками)
+          → footnotes.json           (этап 4, нормализованные сноски)
             → final_clean.txt        (этап 5, TXT)
+            → lt_stats.json          (этап 5, JSON)
               → final_llm.txt        (этап 6, TXT)
+              → llm_stats.json       (этап 6, JSON)
                 → final_better.txt   (этап 8, TXT)
                   → Название.epub    (этап 9)
+                  → epubcheck_report.json (этап 9, JSON)
 ```
 
 ## Приоритет выбора файла для EPUB
@@ -126,9 +154,21 @@ book.pdf
 Берётся первый существующий:
 
 ```
-final_better.txt > final_llm.txt > final_clean.txt > final.txt
-  > structured_rules.json > structured.json
+final_better.txt > final_llm.txt > final_clean.txt
+  > final_structured.json > final.txt
+    > structured_rules.json > structured.json
 ```
+
+Маркеры сносок `{{fn:N}}` сохраняются в тексте на всех этапах.
+Тела сносок загружаются из `footnotes.json` (рядом с входным файлом).
+
+## Специальные режимы
+
+| Режим | Флаг | Эффект |
+|-------|------|--------|
+| Стихи | `--poetry` | Блоки получают роль `verse`, строки не сливаются |
+| Сноски | автоматически | Тела сносок (низ страницы, мелкий шрифт) → `footnotes.json`, маркеры → `{{fn:N}}` |
+| Номера страниц | автоматически | Числа/римские цифры в верхних/нижних 10% страницы удаляются |
 
 ## Побочные отчёты (не влияют на основную цепочку)
 
@@ -137,12 +177,34 @@ final_better.txt > final_llm.txt > final_clean.txt > final.txt
 | 7 | `context_warnings.txt` | Предупреждения контекстной проверки |
 | Natasha | `natasha_diff.txt` | Различия в именованных сущностях |
 | Natasha | `natasha_sync.txt` | Отчёт синхронизации имён |
+| 5 | `lt_stats.json` | JSON-статистика орфокоррекции (LanguageTool/Yandex) |
+| 6 | `llm_stats.json` | JSON-статистика LLM-коррекции (чанки, токены, сомнения) |
+| 9 | `epubcheck_report.json` | JSON-отчёт валидации EPUB (ошибки/предупреждения) |
+| Пайплайн | `quality_report.md` | Итоговый отчёт прогона (если `--quality-report`) |
 
 ## Форматы данных
 
 | Этапы | Формат | Содержимое |
 |-------|--------|------------|
 | 0 | PDF (изображения) | Улучшенные сканы страниц |
-| 1–3 | JSON | `{"blocks": [{"page", "role", "text", "wsize", "bbox"}]}` |
-| 4–8 | TXT | Плоский текст, абзацы через двойной перенос строки |
-| 9 | EPUB | Книга с главами, обложкой, оглавлением |
+| 1–3 | JSON | `{"blocks": [{page, role, text, wsize, bbox}], "footnotes": [{id, marker, text, page}]}` |
+| 4–8 | TXT / JSON | Плоский текст (TXT) или структурированный с ролями (JSON) |
+| 9 | EPUB | Книга с главами, обложкой, оглавлением, сносками |
+
+## Оркестрация пайплайна (`pdf_to_epub.py`)
+
+`pdf_to_epub.py` — единая точка входа, которая запускает этапы и может сохранять отчёт качества.
+
+### Профили качества
+
+Профили выставляют рекомендуемые флаги по умолчанию (явно заданные флаги не перетираются):
+
+- `--profile prose`: включает `lt-cloud + yandex-speller + llm (overlap + book-memory) + post-clean + natasha-sync`
+- `--profile scan-old`: включает `preprocess + easyocr + llm-old-russian + overlap + post-clean + natasha-sync`
+- `--profile poetry`: включает `--poetry`, по умолчанию без LLM, с `post-clean`
+- `--profile fast`: отключает тяжёлые этапы (LLM/LT/post-clean/natasha)
+
+### Отчёт качества
+
+`--quality-report` сохраняет `out/quality_report.md`, куда автоматически подтягиваются:
+`lt_stats.json`, `llm_stats.json`, `epubcheck_report.json` и выдержка из `natasha_sync.txt`.

@@ -21,6 +21,12 @@ class Mention:
     type: str
 
 
+@dataclass(frozen=True)
+class SpanMention(Mention):
+    start: int
+    stop: int
+
+
 def load_pdf_text(pdf_path: Path) -> str:
     doc = fitz.open(pdf_path)
     pages = [page.get_text("text") for page in doc]
@@ -36,11 +42,15 @@ class NatashaPipeline:
         self.morph_vocab = MorphVocab()
 
     def extract(self, text: str, allowed_types: Sequence[str]) -> List[Mention]:
+        spans = self.extract_spans(text, allowed_types)
+        return [Mention(text=s.text, normal=s.normal, type=s.type) for s in spans]
+
+    def extract_spans(self, text: str, allowed_types: Sequence[str]) -> List[SpanMention]:
         doc = Doc(text)
         doc.segment(self.segmenter)
         doc.tag_morph(self.morph_tagger)
         doc.tag_ner(self.ner_tagger)
-        mentions = []
+        mentions: list[SpanMention] = []
         for span in doc.spans:
             if span.type not in allowed_types:
                 continue
@@ -49,7 +59,15 @@ class NatashaPipeline:
             except ValueError:
                 pass
             normal = span.normal or span.text
-            mentions.append(Mention(text=span.text, normal=normal, type=span.type))
+            mentions.append(
+                SpanMention(
+                    text=span.text,
+                    normal=normal,
+                    type=span.type,
+                    start=span.start,
+                    stop=span.stop,
+                )
+            )
         return mentions
 
 
@@ -63,6 +81,27 @@ def collect_mentions(text: str, allowed_types: Sequence[str], deduplicate: bool 
     if deduplicate:
         return dedupe(mentions)
     return mentions
+
+
+def collect_span_mentions(
+    text: str,
+    allowed_types: Sequence[str],
+    deduplicate: bool = False,
+) -> List[SpanMention]:
+    pipeline = NatashaPipeline()
+    spans = pipeline.extract_spans(text, allowed_types)
+    if not deduplicate:
+        return spans
+    # Дедупликация с сохранением первого порядка появления.
+    seen = set()
+    unique: list[SpanMention] = []
+    for m in spans:
+        key = (m.normal, m.type)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(m)
+    return unique
 
 
 def dedupe(mentions: Iterable[Mention]) -> List[Mention]:

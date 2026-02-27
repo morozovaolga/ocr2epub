@@ -7,11 +7,15 @@ LLM исправляет OCR-ошибки, сохраняя стиль и сод
 
 import argparse
 import os
+import re
+import sqlite3
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from html import escape as hesc
 from typing import Optional
+import json
 
 # Принудительно UTF-8 на Windows (до любых импортов сетевых библиотек)
 if sys.platform == "win32":
@@ -150,23 +154,176 @@ DOUBT_SEPARATOR = "===СОМНИТЕЛЬНЫЕ==="
 GIGACHAT_ENV_KEY = "GIGACHAT_CREDENTIALS"
 GIGACHAT_DEFAULT_MODEL = "GigaChat"
 
+_RU_WORD_RE = re.compile(r"[А-Яа-яЁё]{3,}")
+_RU_STOPWORDS = {
+    "и", "в", "во", "на", "к", "ко", "о", "об", "от", "до", "за", "из", "у", "по",
+    "с", "со", "для", "без", "при", "над", "под", "про", "через", "как", "что",
+    "это", "то", "не", "ни", "но", "а", "или", "ли", "же", "бы", "б", "вот",
+    "там", "тут", "здесь", "где", "когда", "потом", "тогда", "теперь",
+    "он", "она", "оно", "они", "мы", "вы", "ты", "я", "его", "ее", "её", "их",
+    "меня", "тебя", "себя", "вам", "нам", "ему", "ей", "им",
+    "этот", "эта", "эти", "тот", "та", "те", "все", "всё", "вся", "весь",
+    "быть", "есть", "был", "была", "были", "будет", "будут",
+}
+
+
+@dataclass(frozen=True)
+class Chunk:
+    text: str
+    para_ids: list[int]
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    return text.split("\n\n")
+
+
+def build_chunks_by_paragraphs(text: str, max_len: int = 3000) -> list[Chunk]:
+    """Разбить текст на чанки по абзацам, не превышая max_len символов.
+
+    Возвращает чанки вместе с индексами абзацев (для retrieval “памяти книги”).
+    """
+    paras = _split_paragraphs(text)
+    chunks: list[Chunk] = []
+    buf_ids: list[int] = []
+    cur_len = 0
+
+    def flush():
+        nonlocal buf_ids, cur_len
+        if not buf_ids:
+            return
+        chunk_text = "\n\n".join(paras[i] for i in buf_ids)
+        chunks.append(Chunk(text=chunk_text, para_ids=list(buf_ids)))
+        buf_ids = []
+        cur_len = 0
+
+    for idx, p in enumerate(paras):
+        sep = 2 if buf_ids else 0  # "\n\n" между абзацами
+        add_len = sep + len(p)
+        if buf_ids and cur_len + add_len > max_len:
+            flush()
+            sep = 0
+            add_len = len(p)
+        buf_ids.append(idx)
+        cur_len += add_len
+
+        # Если один абзац сам по себе больше max_len — оставляем как отдельный чанк.
+        if len(p) > max_len and len(buf_ids) == 1:
+            flush()
+
+    flush()
+    return chunks
+
+
+def _tail_context(prev_text: str, overlap_chars: int) -> str:
+    if overlap_chars <= 0 or not prev_text:
+        return ""
+    tail = prev_text[-overlap_chars:]
+    cut = tail.find("\n\n")
+    if 0 <= cut < len(tail) - 20:
+        tail = tail[cut + 2 :]
+    return tail.strip()
+
+
+def _extract_query_terms(text: str, max_terms: int = 12) -> list[str]:
+    words = [w.lower() for w in _RU_WORD_RE.findall(text)]
+    freq: dict[str, int] = {}
+    for w in words:
+        if w in _RU_STOPWORDS:
+            continue
+        if len(w) < 4:
+            continue
+        freq[w] = freq.get(w, 0) + 1
+    ranked = sorted(freq.items(), key=lambda kv: (kv[1], len(kv[0])), reverse=True)
+    return [w for w, _ in ranked[:max_terms]]
+
+
+class _BookMemory:
+    """Лёгкий retrieval по всей книге через SQLite FTS5 (без внешних зависимостей)."""
+
+    def __init__(self, paragraphs: list[str]):
+        self.paragraphs = paragraphs
+        self.conn: Optional[sqlite3.Connection] = None
+        try:
+            conn = sqlite3.connect(":memory:")
+            conn.execute("CREATE VIRTUAL TABLE paras USING fts5(content, pid UNINDEXED)")
+            conn.executemany(
+                "INSERT INTO paras(content, pid) VALUES(?, ?)",
+                ((p, str(i)) for i, p in enumerate(paragraphs) if p.strip()),
+            )
+            self.conn = conn
+        except Exception:
+            self.conn = None
+
+    def is_available(self) -> bool:
+        return self.conn is not None
+
+    def search_similar(
+        self,
+        text: str,
+        topk: int = 3,
+        exclude_pids: set[int] | None = None,
+        exclude_window: int = 20,
+        max_chars: int = 1200,
+    ) -> str:
+        if not self.conn or topk <= 0:
+            return ""
+        terms = _extract_query_terms(text)
+        if not terms:
+            return ""
+
+        query = " ".join(terms)
+        exclude_pids = exclude_pids or set()
+
+        want = max(topk * 6, 10)
+        try:
+            rows = self.conn.execute(
+                "SELECT pid, content, bm25(paras) AS score "
+                "FROM paras WHERE paras MATCH ? "
+                "ORDER BY score LIMIT ?",
+                (query, want),
+            ).fetchall()
+        except Exception:
+            try:
+                rows = self.conn.execute(
+                    "SELECT pid, content FROM paras WHERE paras MATCH ? LIMIT ?",
+                    (query, want),
+                ).fetchall()
+            except Exception:
+                return ""
+
+        if exclude_pids:
+            lo = min(exclude_pids) - exclude_window
+            hi = max(exclude_pids) + exclude_window
+        else:
+            lo, hi = 10**9, -10**9
+
+        snippets: list[str] = []
+        used = 0
+        for row in rows:
+            pid = int(row[0])
+            if pid in exclude_pids:
+                continue
+            if lo <= pid <= hi:
+                continue
+            p = (row[1] or "").strip()
+            if not p:
+                continue
+            if len(p) > 450:
+                p = p[:450].rstrip() + "…"
+            piece = f"[{pid}] {p}"
+            if used + len(piece) + 1 > max_chars:
+                break
+            snippets.append(piece)
+            used += len(piece) + 1
+            if len(snippets) >= topk:
+                break
+
+        return "\n".join(snippets).strip()
+
 
 def chunks_by_paragraphs(text: str, max_len: int = 3000) -> list[str]:
     """Разбить текст на чанки по абзацам, не превышая max_len символов."""
-    paras = text.split("\n\n")
-    out: list[str] = []
-    buf: list[str] = []
-    cur = 0
-    for p in paras:
-        piece = p + "\n\n"
-        if cur + len(piece) > max_len and buf:
-            out.append("".join(buf))
-            buf, cur = [], 0
-        buf.append(piece)
-        cur += len(piece)
-    if buf:
-        out.append("".join(buf))
-    return out
+    return [c.text for c in build_chunks_by_paragraphs(text, max_len=max_len)]
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +356,12 @@ def correct_gigachat(
     cautious: bool = False,
     old_russian: bool = False,
     user_context: str = "",
+    overlap_chars: int = 0,
+    overlap_paragraphs: int = 0,
+    use_book_memory: bool = False,
+    memory_topk: int = 3,
+    memory_exclude_window: int = 20,
+    memory_max_chars: int = 1200,
 ) -> tuple[str, dict, list[str]]:
     """Коррекция через GigaChat API (Сбер).
     
@@ -238,7 +401,7 @@ def correct_gigachat(
     if cautious:
         print("  Режим: осторожный (сомнительные слова не меняются, выносятся в список)")
 
-    chunks = chunks_by_paragraphs(text, max_len=chunk_size)
+    chunks = build_chunks_by_paragraphs(text, max_len=chunk_size)
     fixed_chunks: list[str] = []
     all_doubts: list[str] = []
     total_in = 0
@@ -250,22 +413,69 @@ def correct_gigachat(
     # В осторожном режиме нужно больше токенов для списка сомнений
     extra_tokens_cautious = 300
 
+    paragraphs = _split_paragraphs(text)
+    book_mem = _BookMemory(paragraphs) if use_book_memory else None
+    if use_book_memory and (not book_mem or not book_mem.is_available()):
+        print("  Память книги: недоступна (SQLite без FTS5), продолжаю без retrieval.")
+        book_mem = None
+    elif book_mem and book_mem.is_available():
+        print(
+            f"  Память книги: включена (topk={memory_topk}, окно исключения={memory_exclude_window})"
+        )
+
     with GigaChat(
         credentials=credentials,
         model=model,
         verify_ssl_certs=False,
         timeout=60.0,
     ) as client:
-        for i, chunk in enumerate(chunks, 1):
+        prev_chunk_text = ""
+        for i, ch in enumerate(chunks, 1):
+            chunk = ch.text
             print(f"  LLM чанк {i}/{len(chunks)} ({len(chunk)} симв.)...",
                   end=" ", flush=True)
             success = False
 
-            # Формируем пользовательское сообщение с опциональным контекстом
-            if user_context:
-                user_msg = user_context.rstrip() + "\n\n" + chunk
-            else:
-                user_msg = chunk
+            ctx_parts: list[str] = []
+
+            # 1) Нахлёст: read-only хвост предыдущего чанка
+            tail = ""
+            if overlap_paragraphs > 0 and prev_chunk_text:
+                prev_paras = _split_paragraphs(prev_chunk_text)
+                tail = "\n\n".join(prev_paras[-overlap_paragraphs:]).strip()
+            elif overlap_chars > 0 and prev_chunk_text:
+                tail = _tail_context(prev_chunk_text, overlap_chars=overlap_chars)
+            if tail:
+                ctx_parts.append(
+                    "КОНТЕКСТ (только для понимания; НЕ исправляй и НЕ возвращай его):\n"
+                    + tail
+                )
+
+            # 2) Память книги: похожие места для согласованности имён/терминов
+            if book_mem and memory_topk > 0:
+                similar = book_mem.search_similar(
+                    chunk,
+                    topk=memory_topk,
+                    exclude_pids=set(ch.para_ids),
+                    exclude_window=memory_exclude_window,
+                    max_chars=memory_max_chars,
+                )
+                if similar:
+                    ctx_parts.append(
+                        "ПОХОЖИЕ МЕСТА ИЗ ЭТОЙ ЖЕ КНИГИ (для согласованности имён/терминов; "
+                        "не копируй дословно, используй только чтобы выбрать правильное написание):\n"
+                        + similar
+                    )
+
+            ctx_block = ("\n\n".join(ctx_parts).strip() + "\n\n") if ctx_parts else ""
+            prefix = (user_context.rstrip() + "\n\n") if user_context else ""
+            user_msg = (
+                prefix
+                + ctx_block
+                + "MAIN (исправь ТОЛЬКО этот фрагмент; верни ТОЛЬКО исправленный MAIN, "
+                "без заголовков и пояснений):\n"
+                + chunk
+            )
 
             # max_tokens: множитель 1.2 от длины чанка (план рекомендует
             # для old-russian, но применяем ко всем режимам для надёжности).
@@ -322,6 +532,7 @@ def correct_gigachat(
 
             if i < len(chunks):
                 time.sleep(sleep)
+            prev_chunk_text = chunk
 
     stats = {
         "provider": "gigachat",
@@ -346,6 +557,12 @@ def correct_text(
     cautious: bool = False,
     old_russian: bool = False,
     user_context: str = "",
+    overlap_chars: int = 0,
+    overlap_paragraphs: int = 0,
+    use_book_memory: bool = False,
+    memory_topk: int = 3,
+    memory_exclude_window: int = 20,
+    memory_max_chars: int = 1200,
 ) -> tuple[str, dict, list[str]]:
     """
     Коррекция текста через GigaChat.
@@ -369,6 +586,12 @@ def correct_text(
     return correct_gigachat(
         text, model=m, credentials=creds, chunk_size=chunk_size, sleep=sleep,
         cautious=cautious, old_russian=old_russian, user_context=user_context,
+        overlap_chars=overlap_chars,
+        overlap_paragraphs=overlap_paragraphs,
+        use_book_memory=use_book_memory,
+        memory_topk=memory_topk,
+        memory_exclude_window=memory_exclude_window,
+        memory_max_chars=memory_max_chars,
     )
 
 
@@ -440,6 +663,38 @@ def main():
         help="Дополнительный контекст перед каждым чанком "
              '(напр. "Текст из «Хождения за три моря» Афанасия Никитина")',
     )
+    ap.add_argument(
+        "--overlap-chars", type=int, default=0,
+        help="Нахлёст: сколько символов брать хвостом из предыдущего чанка "
+             "как read-only контекст (по умолчанию: 0)",
+    )
+    ap.add_argument(
+        "--overlap-paragraphs", type=int, default=0,
+        help="Нахлёст по абзацам (предпочтительнее символов): сколько последних "
+             "абзацев предыдущего чанка добавлять как read-only контекст "
+             "(по умолчанию: 0)",
+    )
+    ap.add_argument(
+        "--book-memory", action="store_true",
+        help="Включить “память книги”: подтягивать похожие места из других частей текста "
+             "для согласованности имён/терминов (SQLite FTS5, без внешних зависимостей)",
+    )
+    ap.add_argument(
+        "--memory-topk", type=int, default=3,
+        help="Сколько похожих фрагментов добавлять из памяти книги (по умолчанию: 3)",
+    )
+    ap.add_argument(
+        "--memory-exclude-window", type=int, default=20,
+        help="Исключать абзацы рядом с текущим чанком (по обе стороны, по умолчанию: 20)",
+    )
+    ap.add_argument(
+        "--memory-max-chars", type=int, default=1200,
+        help="Ограничение на размер retrieval-контекста (символы, по умолчанию: 1200)",
+    )
+    ap.add_argument(
+        "--stats-json", default="",
+        help="Если указан, сохранить статистику LLM-прогона в JSON",
+    )
     args = ap.parse_args()
 
     if not args.inp:
@@ -461,6 +716,12 @@ def main():
         cautious=args.cautious,
         old_russian=args.old_russian,
         user_context=args.user_context,
+        overlap_chars=args.overlap_chars,
+        overlap_paragraphs=args.overlap_paragraphs,
+        use_book_memory=args.book_memory,
+        memory_topk=args.memory_topk,
+        memory_exclude_window=args.memory_exclude_window,
+        memory_max_chars=args.memory_max_chars,
     )
 
     out_txt = outdir / "final_llm.txt"
@@ -495,6 +756,31 @@ def main():
             f"{stats['chunks']} чанков, "
             f"{stats['input_tokens']} input + {stats['output_tokens']} output токенов"
         )
+    if args.stats_json:
+        try:
+            payload = dict(stats)
+            payload.update(
+                {
+                    "tool": "llm_correction",
+                    "chunk_size_chars": args.chunk_size,
+                    "overlap_chars": args.overlap_chars,
+                    "overlap_paragraphs": args.overlap_paragraphs,
+                    "book_memory": bool(args.book_memory),
+                    "memory_topk": args.memory_topk,
+                    "memory_exclude_window": args.memory_exclude_window,
+                    "memory_max_chars": args.memory_max_chars,
+                    "cautious": bool(args.cautious),
+                    "old_russian": bool(args.old_russian),
+                    "doubts_count": len(doubts),
+                    "input_chars": len(text),
+                    "output_chars": len(fixed_text),
+                }
+            )
+            Path(args.stats_json).write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception as exc:
+            print(f"⚠️  Не удалось записать stats-json: {exc}")
 
 
 if __name__ == "__main__":

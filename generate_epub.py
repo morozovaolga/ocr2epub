@@ -328,14 +328,19 @@ def load_blocks_from_text(text: str):
         lines = text.splitlines()
         paragraphs = []
         current_para = []
-        for line in lines:
-            line = line.strip()
-            if not line:
+        for raw_line in lines:
+            # Пустая строка — явная граница абзаца
+            if not raw_line.strip():
                 if current_para:
                     paragraphs.append('\n'.join(current_para))
                     current_para = []
             else:
-                current_para.append(line)
+                # Если абзац в исходном тексте отмечен отступом первой строки,
+                # считаем это началом нового абзаца (когда явных пустых строк нет).
+                if (raw_line.startswith((" ", "\t"))) and current_para:
+                    paragraphs.append('\n'.join(current_para))
+                    current_para = []
+                current_para.append(raw_line.strip())
         # Добавляем последний абзац
         if current_para:
             paragraphs.append('\n'.join(current_para))
@@ -1119,6 +1124,7 @@ def generate_epub(
                     css_text += (
                         "\n.footnotes { margin-top: 2em; border-top: 1px solid #ccc; padding-top: 0.5em; font-size: 0.85em; }\n"
                         ".footnotes aside { margin: 0.3em 0; }\n"
+                        ".footnotes p { text-indent: 0; margin: 0.2em 0; }\n"
                     )
                     changed = True
                 if changed:
@@ -1537,6 +1543,75 @@ def validate_epub(epub_path: Path) -> bool:
     return result.valid
 
 
+def validate_epub_json(epub_path: Path) -> dict:
+    """Валидация EPUB через epubcheck с JSON-результатом.
+
+    Returns:
+        dict со сводкой (valid/errors/warnings/messages...).
+    """
+    payload: dict = {
+        "tool": "epubcheck",
+        "epub": str(epub_path),
+        "valid": None,
+        "errors": 0,
+        "warnings": 0,
+        "messages": [],
+        "status": "unknown",
+    }
+
+    try:
+        from epubcheck import EpubCheck
+    except ImportError:
+        payload["status"] = "missing_epubcheck"
+        payload["valid"] = True  # не блокируем пайплайн
+        return payload
+
+    try:
+        result = EpubCheck(str(epub_path))
+    except Exception as e:
+        payload["status"] = "error"
+        payload["valid"] = True  # не блокируем пайплайн
+        payload["messages"] = [{"level": "ERROR", "message": f"Exception: {e}", "location": ""}]
+        return payload
+
+    payload["status"] = "ok"
+    payload["valid"] = bool(getattr(result, "valid", False))
+
+    errors = 0
+    warnings = 0
+    messages_out: list[dict] = []
+
+    msgs = getattr(result, "messages", None) or []
+    for msg in msgs:
+        if hasattr(msg, "level"):
+            level = str(getattr(msg, "level", "INFO"))
+            message = getattr(msg, "message", str(msg))
+            location = getattr(msg, "location", "") or ""
+        elif isinstance(msg, dict):
+            level = str(msg.get("severity", msg.get("level", "INFO")))
+            message = msg.get("message", str(msg))
+            location = msg.get("location", msg.get("locations", "")) or ""
+        else:
+            level = "INFO"
+            message = str(msg)
+            location = ""
+
+        level_u = level.upper()
+        if "ERROR" in level_u or "FATAL" in level_u:
+            errors += 1
+        elif "WARN" in level_u:
+            warnings += 1
+
+        messages_out.append(
+            {"level": level_u, "message": str(message), "location": str(location)}
+        )
+
+    payload["errors"] = errors
+    payload["warnings"] = warnings
+    payload["messages"] = messages_out
+    return payload
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Генерация EPUB на основе шаблона и текста из JSON, HTML или TXT"
@@ -1554,6 +1629,7 @@ def main():
     ap.add_argument("--max-chapter-size", type=int, default=50, help="Максимальный размер главы/секции в KB (по умолчанию 50)")
     ap.add_argument("--use-chapter-heads", action="store_true", help="Использовать поиск заголовков для разделения на главы (по умолчанию: простое разделение по размеру)")
     ap.add_argument("--no-validate", action="store_true", help="Пропустить валидацию EPUB через epubcheck")
+    ap.add_argument("--epubcheck-json", default="", help="Если указан, сохранить JSON-отчёт epubcheck")
     args = ap.parse_args()
     
     template_epub = Path(args.template)
@@ -1655,6 +1731,15 @@ def main():
     # Валидация EPUB через epubcheck
     if not args.no_validate and output_epub.exists():
         validate_epub(output_epub)
+        if args.epubcheck_json:
+            try:
+                rep = validate_epub_json(output_epub)
+                Path(args.epubcheck_json).write_text(
+                    json.dumps(rep, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception as exc:
+                print(f"⚠️  Не удалось записать epubcheck-json: {exc}")
     
     return 0
 

@@ -71,13 +71,16 @@ class YandexSpellerChecker(SpellChecker):
 
     def check(self, text: str) -> List[Dict]:
         url = 'https://speller.yandex.net/services/spellservice.json/checkText'
+        # Для JSON endpoint параметр format не нужен (и может давать 400).
+        # options оставляем 0 (по умолчанию), чтобы запрос был явным.
         data = parse.urlencode({
             'text': text,
             'lang': self.lang,
-            'format': 'json'
+            'options': 0,
         }).encode('utf-8')
         req = request.Request(url, data=data, headers={
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'User-Agent': 'ocr2epub/lt_cloud',
         })
         with request.urlopen(req, timeout=self.timeout) as resp:
             payload = resp.read().decode('utf-8', errors='replace')
@@ -174,6 +177,7 @@ def main():
     ap.add_argument('--sleep', type=float, default=0.5, help='Пауза между запросами (сек)')
     ap.add_argument('--timeout', type=int, default=60, help='Таймаут HTTP (сек)')
     ap.add_argument('--chunk-size', type=int, default=6000, help='Максимум символов для одного запроса')
+    ap.add_argument('--stats-json', default='', help='Если указан, сохранить статистику в JSON')
     ap.add_argument('--yandex-speller', action='store_true',
                     help='Дополнительно использовать Yandex.Speller (бесплатно, без ключа)')
     ap.add_argument('--no-lt', action='store_true',
@@ -204,6 +208,22 @@ def main():
     total_safe = sum(stats.values())
     detail = ", ".join(f"{name}: {count}" for name, count in stats.items())
     print(f'Применено исправлений: {total_safe} ({detail}). Сохранено final_clean.txt/html в {outdir}')
+    if args.stats_json:
+        try:
+            payload = {
+                "tool": "lt_cloud",
+                "checkers": [c.name for c in checkers],
+                "chunk_size": args.chunk_size,
+                "sleep": args.sleep,
+                "timeout": args.timeout,
+                "applied_total": total_safe,
+                "applied_by_checker": stats,
+                "input_chars": len(text),
+                "output_chars": len(fixed_text),
+            }
+            Path(args.stats_json).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            print(f"⚠️  Не удалось записать stats-json: {exc}")
 
 
 if __name__ == '__main__':

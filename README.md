@@ -51,8 +51,12 @@ python pdf_to_epub.py \
   --outdir out \
   --title "Название книги" \
   --author "Автор" \
+  --profile prose \
+  --quality-report \
   --llm-correct \
   --llm-chunk-size 6000 \
+  --llm-overlap-paragraphs 1 \
+  --llm-book-memory --llm-memory-topk 3 --llm-memory-exclude-window 30 \
   --post-clean \
   --epub-template sample.epub
 ```
@@ -69,6 +73,8 @@ python pdf_to_epub.py \
   --yandex-speller \
   --llm-correct \
   --llm-chunk-size 6000 \
+  --llm-overlap-paragraphs 1 \
+  --llm-book-memory --llm-memory-topk 3 --llm-memory-exclude-window 30 \
   --post-clean \
   --epub-template sample.epub
 ```
@@ -151,8 +157,9 @@ python pdf_to_epub.py \
 | `--two-columns` | PDF с двумя колонками |
 | `--no-oldspelling` | Пропустить правила дореформенной орфографии |
 | `--poetry` | Режим стихов: сохранять строки и строфы, фильтровать мусор |
-| `--keep-page-numbers` | Не удалять номера страниц (по умолчанию: удаляются) |
 | `--html` | Генерировать промежуточные HTML-файлы для ручной проверки |
+| `--profile {prose,scan-old,poetry,fast}` | Профиль качества: выставляет рекомендуемые флаги по умолчанию |
+| `--quality-report [FILE]` | Сохранить отчёт прогона в `out/quality_report.md` (или в указанный файл) |
 
 ### OCR-движок
 
@@ -195,6 +202,25 @@ python pdf_to_epub.py \
 | `--yandex-speller` | Yandex.Speller — дополнительная проверка |
 | `--chunk-size N` | Размер блока для LanguageTool (по умолчанию: 6000) |
 
+## Проблемы и решения
+
+### Yandex.Speller: `HTTP Error 400: Bad request`
+
+Такое чаще всего происходит из‑за слишком большого/“тяжёлого” куска текста в одном запросе (или из‑за несовместимых параметров запроса).
+
+Что сделать:
+
+- **уменьшить размер чанка** для этапа орфографии, например:
+
+```bash
+python pdf_to_epub.py ... --yandex-speller --chunk-size 2000
+```
+
+- **временно отключить Yandex.Speller**, оставив только LanguageTool:
+  - просто не указывать `--yandex-speller` (при `--lt-cloud`)
+
+- **если запускаете `lt_cloud.py` напрямую** — проверьте, что используете актуальную версию проекта (в коде запроса к JSON endpoint не должно быть параметра `format=json`).
+
 ### LLM-коррекция (GigaChat)
 
 | Флаг | Описание |
@@ -204,12 +230,22 @@ python pdf_to_epub.py \
 | `--llm-api-key KEY` | GIGACHAT_CREDENTIALS (или через `.env`) |
 | `--llm-chunk-size N` | Размер чанка (по умолчанию: 3000) |
 | `--llm-cautious` | Осторожный режим: не менять сомнительные слова, а вынести в `doubt_words.txt` |
+| `--llm-old-russian` | Режим для старорусских/древнерусских текстов (агрессивная склейка разорванных слов) |
+| `--llm-user-context "..."` | Доп. контекст перед каждым чанком (например, “Текст из …”) |
+| `--llm-overlap-paragraphs N` | Нахлёст по абзацам: хвост предыдущего чанка даётся как read-only контекст (уменьшает ошибки на границах) |
+| `--llm-overlap-chars N` | Нахлёст по символам (если абзацы “ломаные”) |
+| `--llm-book-memory` | “Память книги”: перед каждым чанком подтягивает похожие места из других частей текста для согласованности имён/терминов |
+| `--llm-memory-topk K` | Сколько похожих фрагментов добавлять (по умолчанию: 3) |
+| `--llm-memory-exclude-window W` | Исключать абзацы рядом с текущим чанком, чтобы чаще попадали другие главы (по умолчанию: 20) |
+| `--llm-memory-max-chars C` | Ограничение на объём retrieval-контекста (по умолчанию: 1200 символов) |
 
 ### Контекстная проверка и пост-очистка
 
 | Флаг | Описание |
 |------|----------|
 | `--context-check` | Контекстная проверка (местоимение + глагол) |
+| `--context-out FILE` | Куда сохранить отчёт контекстной проверки (по умолчанию: `context_warnings.txt`) |
+| `--context-pronouns "..."` | Местоимения через запятую для контекстной проверки |
 | `--post-clean` | Склейка букв, склейка разорванных слов (navec + pymorphy2), латиница -> кириллица |
 
 ### Natasha (именованные сущности)
@@ -218,16 +254,183 @@ python pdf_to_epub.py \
 |------|----------|
 | `--natasha-check` | Проверка сущностей (PER, LOC, ORG) |
 | `--natasha-sync` | Синхронизация имён из PDF с обработанным текстом |
+| `--natasha-types TYPES` | Типы сущностей (по умолчанию: `PER,LOC`) |
+| `--natasha-out FILE` | Файл отчёта `--natasha-check` (по умолчанию: `natasha_diff.txt`) |
+| `--natasha-sync-report FILE` | Файл отчёта `--natasha-sync` (по умолчанию: `natasha_sync.txt`) |
+
+**Как работает `--natasha-sync`:**
+
+- Сущности (PER/LOC/ORG) извлекаются из PDF и из обработанного текста.
+- Замены применяются **точечно по позициям сущностей**, а не глобальным `replace()`.
+- Форма (падеж/написание) подбирается из PDF **по похожести**, чтобы снизить риск “сломать” грамматику.
 
 ### Токенизация и EPUB
 
 | Флаг | Описание |
 |------|----------|
 | `--stanza-tokenize` | Улучшить разбиение на предложения через Stanza |
+| `--stanza-model PATH` | Путь к модели Stanza (.pt) для `--stanza-tokenize` |
 | `--epub-template PATH` | Шаблон EPUB (по умолчанию: `sample.epub`) |
 | `--epub-max-chapter-size KB` | Макс. размер главы в KB (по умолчанию: 50) |
 | `--epub-use-chapter-heads` | Разделять главы по найденным заголовкам |
 | `--cover-colors COLORS` | Пять HEX-цветов для обложки через запятую |
+| `--despace` | Агрессивная склейка разорванных пробелами слов (полезно для старых сканов с кернингом) |
+| `--word-split` | Разбиение склеенных слов (обратный режим к `--despace`) |
+
+## Словарь: частые задачи → флаги
+
+- **Проза (качество “по умолчанию”)**:
+  - `--profile prose --quality-report`
+
+- **Скан / старое издание (много разорванных слов)**:
+  - `--profile scan-old --quality-report`
+  - если слов “слиплось” слишком много: попробуйте `--despace`, а если стало наоборот “слишком слитно” — добавьте `--word-split`
+
+- **Качество LLM падает ближе к концу книги**:
+  - уменьшить `--llm-chunk-size` (например 4000–5500)
+  - включить `--llm-overlap-paragraphs 1`
+  - включить `--llm-book-memory` (для единых имён/терминов)
+
+- **Нужна глобальная согласованность имён по всей книге**:
+  - включить `--llm-book-memory`
+  - включить `--natasha-sync` (если PDF — эталон по именам)
+
+- **Нужно быстро и дёшево (черновик)**:
+  - `--profile fast`
+
+- **Проверить качество вёрстки EPUB**:
+  - включить `--quality-report` (подтянет `epubcheck_report.json` в отчёт)
+  - при проблемах смотреть `out/epubcheck_report.json` и открывать EPUB в 2–3 читалках
+
+## Словарь: где какой флаг работает
+
+> В основном пайплайне используйте `pdf_to_epub.py`. Остальные скрипты — для точечной отладки.
+
+| Флаг | Где работает | Зачем |
+|------|--------------|-------|
+| `--profile ...` | `pdf_to_epub.py` | Готовые пресеты качества |
+| `--quality-report [FILE]` | `pdf_to_epub.py` | Итоговый отчёт (`quality_report.md`) |
+| `--preprocess ...` | `pdf_to_epub.py` → `preprocess_pdf.py` | Улучшить скан до OCR |
+| `--ocr-engine/--ocr-dpi` | `pdf_to_epub.py` → `ocr_engine.py` | Выбор OCR/извлечения |
+| `--pages` | `ocr_engine.py`, `preprocess_pdf.py` | Обработать диапазон страниц |
+| `--keep-page-numbers` | `extract_structured_text.py` | Не удалять номера страниц (только в альтернативном скрипте) |
+| `--lt-cloud/--yandex-speller` | `pdf_to_epub.py` → `lt_cloud.py` | Орфокоррекция до LLM |
+| `--chunk-size` | `pdf_to_epub.py` → `lt_cloud.py` | Размер чанка для LT/Yandex |
+| `--stats-json` | `lt_cloud.py`, `llm_correction.py` | Записать JSON-статистику этапа |
+| `--llm-correct` | `pdf_to_epub.py` → `llm_correction.py` | LLM-коррекция |
+| `--llm-chunk-size` | `pdf_to_epub.py` → `llm_correction.py` | Размер чанка для LLM |
+| `--llm-overlap-paragraphs/--llm-overlap-chars` | `pdf_to_epub.py` → `llm_correction.py` | Нахлёст между чанками (контекст на границах) |
+| `--llm-book-memory` | `pdf_to_epub.py` → `llm_correction.py` | Retrieval похожих мест по книге |
+| `--llm-old-russian` | `pdf_to_epub.py` → `llm_correction.py` | Режим старорусского текста |
+| `--post-clean` | `pdf_to_epub.py` → `post_cleanup.py` | Пост-очистка (латиница→кириллица, склейки) |
+| `--preserve-newlines` | `post_cleanup.py` | Не ломать переносы (стихи) |
+| `--natasha-check/--natasha-sync` | `pdf_to_epub.py` → `natasha_entity_check.py`/`natasha_sync.py` | Сущности/синхронизация имён |
+| `--min-similarity/--max-pdf-forms/--dry-run` | `natasha_sync.py` | Тонкая настройка синхронизации имён |
+| `--epub-template ...` | `pdf_to_epub.py` → `generate_epub.py` | Генерация EPUB из лучшего источника |
+| `--no-validate` | `generate_epub.py` | Пропустить `epubcheck` |
+| `--epubcheck-json` | `generate_epub.py` | Записать `epubcheck_report.json` |
+
+## Отдельные CLI-утилиты
+
+> `pdf_to_epub.py` — основной вход. Эти скрипты можно запускать отдельно для точечной обработки/отладки.
+> Полный список опций всегда доступен через `python script.py --help`.
+
+### `generate_epub.py` (генерация EPUB из JSON/TXT/HTML)
+
+```bash
+python generate_epub.py --help
+```
+
+- **вход/выход**: `--template`, `--in`, `--out`, `--title`, `--author`
+- **главы**: `--max-chapter-size`, `--use-chapter-heads`
+- **валидация**: `--no-validate`, `--epubcheck-json out/epubcheck_report.json`
+
+### `llm_correction.py` (LLM-коррекция напрямую)
+
+```bash
+python llm_correction.py --help
+```
+
+- **основное**: `--in`, `--outdir`, `--model`, `--api-key`, `--chunk-size`, `--sleep`
+- **качество**: `--overlap-paragraphs/--overlap-chars`, `--book-memory`, `--memory-topk/...`
+- **режимы**: `--cautious`, `--old-russian`, `--user-context`
+- **метрики**: `--stats-json out/llm_stats.json`
+
+### `lt_cloud.py` (орфокоррекция напрямую)
+
+```bash
+python lt_cloud.py --help
+```
+
+- **вход/выход**: `--in`, `--outdir`
+- **режимы**: `--yandex-speller`, `--no-lt`
+- **параметры**: `--chunk-size`, `--sleep`, `--timeout`
+- **метрики**: `--stats-json out/lt_stats.json`
+
+### `ocr_engine.py` (OCR/извлечение структуры напрямую)
+
+```bash
+python ocr_engine.py --help
+```
+
+- `--engine {auto,pymupdf,easyocr,tesseract,doctr}`, `--dpi`, `--pages`, `--two-columns`, `--poetry`
+
+### `extract_structured_text.py` (альтернатива OCR: только PyMuPDF)
+
+```bash
+python extract_structured_text.py --help
+```
+
+- `--pdf`, `--outdir`, `--two-columns`, `--poetry`, `--keep-page-numbers`
+
+### `preprocess_pdf.py` (предобработка PDF перед OCR)
+
+```bash
+python preprocess_pdf.py --help
+```
+
+- `--pdf`, `--out`, `--preset {light,medium,heavy,binarize}`, `--dpi`, `--pages`, `--steps`
+
+### `post_cleanup.py` / `despacer.py` / `word_splitter.py`
+
+```bash
+python post_cleanup.py --help
+python despacer.py --help
+python word_splitter.py --help
+```
+
+- **общие**: `--in`, `--out`, опционально `--html`, `--title`
+- `post_cleanup.py`: `--preserve-newlines` (важно для стихов)
+
+### `natasha_entity_check.py` и `natasha_sync.py`
+
+```bash
+python natasha_entity_check.py --help
+python natasha_sync.py --help
+```
+
+- `natasha_entity_check.py`: `--pdf`, `--clean`, `--out`, `--types`, `--keep-order`
+- `natasha_sync.py`: `--pdf`, `--clean`, `--out`, `--report`, `--types`, `--min-similarity`, `--max-pdf-forms`, `--dry-run`
+
+### `context_checker.py` (контекстный отчёт)
+
+```bash
+python context_checker.py --help
+```
+
+- `--in`, `--out`, `--pronouns`
+
+### `apply_rules_structured.py` / `stanza_tokenizer.py` / `modernize_structured.py`
+
+```bash
+python apply_rules_structured.py --help
+python stanza_tokenizer.py --help
+python modernize_structured.py --help
+```
+
+- `apply_rules_structured.py`: `--rules`, `--in`, `--out`
+- `stanza_tokenizer.py`: `--in`, `--out`, `--model`, `--gpu`
+- `modernize_structured.py`: `--in`, `--outdir`, `--title`
 
 Также скрипт можно использовать отдельно (для подготовки PDF перед FineReader):
 
@@ -304,6 +507,10 @@ python -c "from navec import Navec; Navec.load('navec_hudlit_v1_12B_500K_300d_10
 | `final_structured.json` | Структурированный текст с ролями блоков и сносками |
 | `footnotes.json` | Сноски: id, маркер, текст, страница (если обнаружены) |
 | `doubt_words.txt` | Сомнительные слова (при `--llm-cautious`) |
+| `lt_stats.json` | Статистика орфокоррекции (LanguageTool/Yandex) |
+| `llm_stats.json` | Статистика LLM-коррекции (токены/чанки/сомнения) |
+| `epubcheck_report.json` | JSON-отчёт epubcheck (ошибки/предупреждения) |
+| `quality_report.md` | Итоговый отчёт прогона (если `--quality-report`) |
 | `Название_книги.epub` | Готовый EPUB с обложкой (валидируется epubcheck) |
 
 ## Лицензия
