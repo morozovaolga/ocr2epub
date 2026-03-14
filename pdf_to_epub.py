@@ -1,6 +1,6 @@
-"""
-Единый пайплайн от PDF к EPUB
-Следует точной схеме из PIPELINE_SCHEMA.md
+﻿"""
+Р•РґРёРЅС‹Р№ РїР°Р№РїР»Р°Р№РЅ РѕС‚ PDF Рє EPUB
+РЎР»РµРґСѓРµС‚ С‚РѕС‡РЅРѕР№ СЃС…РµРјРµ РёР· PIPELINE_SCHEMA.md
 """
 import argparse
 import json
@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-# Принудительно UTF-8 на Windows
+# РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ UTF-8 РЅР° Windows
 if sys.platform == 'win32':
     os.environ['PYTHONUTF8'] = '1'
     os.environ['PYTHONIOENCODING'] = 'utf-8'
@@ -25,7 +25,7 @@ if sys.platform == 'win32':
 
 
 def run_cmd(cmd, description=""):
-    """Запускает команду и выводит описание"""
+    """Р—Р°РїСѓСЃРєР°РµС‚ РєРѕРјР°РЅРґСѓ Рё РІС‹РІРѕРґРёС‚ РѕРїРёСЃР°РЅРёРµ"""
     if description:
         print(f"\n{'='*80}")
         print(f"{description}")
@@ -35,127 +35,127 @@ def run_cmd(cmd, description=""):
         subprocess.check_call(cmd)
         return True
     except subprocess.CalledProcessError as e:
-        print(f"Ошибка: {e}")
+        print(f"РћС€РёР±РєР°: {e}")
         return False
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Единый пайплайн: PDF → EPUB (по схеме PIPELINE_SCHEMA.md)',
+        description='Р•РґРёРЅС‹Р№ РїР°Р№РїР»Р°Р№РЅ: PDF в†’ EPUB (РїРѕ СЃС…РµРјРµ PIPELINE_SCHEMA.md)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Примеры использования:
+РџСЂРёРјРµСЂС‹ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ:
 
-1. Базовый вариант (только EPUB без LLM):
-   python pdf_to_epub.py --pdf book.pdf --title "Название" --author "Автор" \\
+1. Р‘Р°Р·РѕРІС‹Р№ РІР°СЂРёР°РЅС‚ (С‚РѕР»СЊРєРѕ EPUB Р±РµР· LLM):
+   python pdf_to_epub.py --pdf book.pdf --title "РќР°Р·РІР°РЅРёРµ" --author "РђРІС‚РѕСЂ" \\
      --epub-template sample.epub
 
-2. С LLM-коррекцией через GigaChat (рекомендуется):
-   python pdf_to_epub.py --pdf book.pdf --title "Название" --author "Автор" \\
+2. РЎ LLM-РєРѕСЂСЂРµРєС†РёРµР№ С‡РµСЂРµР· GigaChat (СЂРµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ):
+   python pdf_to_epub.py --pdf book.pdf --title "РќР°Р·РІР°РЅРёРµ" --author "РђРІС‚РѕСЂ" \\
      --llm-correct --llm-chunk-size 6000 \\
      --post-clean --epub-template sample.epub
 
-3. Полный пайплайн (LanguageTool + GigaChat + пост-очистка):
-   python pdf_to_epub.py --pdf book.pdf --title "Название" --author "Автор" \\
+3. РџРѕР»РЅС‹Р№ РїР°Р№РїР»Р°Р№РЅ (LanguageTool + GigaChat + РїРѕСЃС‚-РѕС‡РёСЃС‚РєР°):
+   python pdf_to_epub.py --pdf book.pdf --title "РќР°Р·РІР°РЅРёРµ" --author "РђРІС‚РѕСЂ" \\
      --lt-cloud --yandex-speller \\
      --llm-correct --llm-chunk-size 6000 \\
      --post-clean --epub-template sample.epub
         """
     )
     
-    # Основные параметры
-    parser.add_argument('--pdf', required=True, help='Путь к PDF файлу')
-    parser.add_argument('--outdir', default='out', help='Папка для результатов (по умолчанию: out)')
-    parser.add_argument('--title', required=True, help='Название книги')
-    parser.add_argument('--author', default='', help='Автор книги')
-    parser.add_argument('--html', action='store_true', help='Генерировать промежуточные HTML-файлы для ручной проверки в браузере')
+    # РћСЃРЅРѕРІРЅС‹Рµ РїР°СЂР°РјРµС‚СЂС‹
+    parser.add_argument('--pdf', required=True, help='РџСѓС‚СЊ Рє PDF С„Р°Р№Р»Сѓ')
+    parser.add_argument('--outdir', default='out', help='РџР°РїРєР° РґР»СЏ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: out)')
+    parser.add_argument('--title', required=True, help='РќР°Р·РІР°РЅРёРµ РєРЅРёРіРё')
+    parser.add_argument('--author', default='', help='РђРІС‚РѕСЂ РєРЅРёРіРё')
+    parser.add_argument('--html', action='store_true', help='Р“РµРЅРµСЂРёСЂРѕРІР°С‚СЊ РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅС‹Рµ HTML-С„Р°Р№Р»С‹ РґР»СЏ СЂСѓС‡РЅРѕР№ РїСЂРѕРІРµСЂРєРё РІ Р±СЂР°СѓР·РµСЂРµ')
     parser.add_argument(
         '--profile',
         default='',
         choices=['', 'prose', 'scan-old', 'poetry', 'fast'],
-        help='Профиль качества: выставляет рекомендуемые флаги по умолчанию (их можно переопределять явно)',
+        help='РџСЂРѕС„РёР»СЊ РєР°С‡РµСЃС‚РІР°: РІС‹СЃС‚Р°РІР»СЏРµС‚ СЂРµРєРѕРјРµРЅРґСѓРµРјС‹Рµ С„Р»Р°РіРё РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ (РёС… РјРѕР¶РЅРѕ РїРµСЂРµРѕРїСЂРµРґРµР»СЏС‚СЊ СЏРІРЅРѕ)',
     )
     parser.add_argument(
         '--quality-report',
         nargs='?',
         const='quality_report.md',
         default='',
-        help='Если указан, сохраняет отчёт о прогоне (по умолчанию: out/quality_report.md). Можно указать имя файла.',
+        help='Р•СЃР»Рё СѓРєР°Р·Р°РЅ, СЃРѕС…СЂР°РЅСЏРµС‚ РѕС‚С‡С‘С‚ Рѕ РїСЂРѕРіРѕРЅРµ (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: out/quality_report.md). РњРѕР¶РЅРѕ СѓРєР°Р·Р°С‚СЊ РёРјСЏ С„Р°Р№Р»Р°.',
     )
     
-    # Этап 0: Предобработка PDF (опционально, перед OCR)
-    parser.add_argument('--preprocess', action='store_true', help='Предобработка PDF: выравнивание, шумодав, контраст (перед OCR)')
+    # Р­С‚Р°Рї 0: РџСЂРµРґРѕР±СЂР°Р±РѕС‚РєР° PDF (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ, РїРµСЂРµРґ OCR)
+    parser.add_argument('--preprocess', action='store_true', help='РџСЂРµРґРѕР±СЂР°Р±РѕС‚РєР° PDF: РІС‹СЂР°РІРЅРёРІР°РЅРёРµ, С€СѓРјРѕРґР°РІ, РєРѕРЅС‚СЂР°СЃС‚ (РїРµСЂРµРґ OCR)')
     parser.add_argument('--preprocess-preset', default='medium', choices=['light', 'medium', 'heavy', 'binarize'],
-                        help='Пресет предобработки (по умолчанию: medium)')
-    parser.add_argument('--preprocess-dpi', type=int, default=300, help='DPI рендеринга для предобработки (по умолчанию: 300)')
-    parser.add_argument('--preprocess-steps', default='', help='Шаги предобработки через запятую (переопределяет пресет)')
-    parser.add_argument('--preprocess-pages', default='', help='Страницы для предобработки: "1-10" или "1,3,5-7" (по умолчанию: все)')
+                        help='РџСЂРµСЃРµС‚ РїСЂРµРґРѕР±СЂР°Р±РѕС‚РєРё (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: medium)')
+    parser.add_argument('--preprocess-dpi', type=int, default=300, help='DPI СЂРµРЅРґРµСЂРёРЅРіР° РґР»СЏ РїСЂРµРґРѕР±СЂР°Р±РѕС‚РєРё (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 300)')
+    parser.add_argument('--preprocess-steps', default='', help='РЁР°РіРё РїСЂРµРґРѕР±СЂР°Р±РѕС‚РєРё С‡РµСЂРµР· Р·Р°РїСЏС‚СѓСЋ (РїРµСЂРµРѕРїСЂРµРґРµР»СЏРµС‚ РїСЂРµСЃРµС‚)')
+    parser.add_argument('--preprocess-pages', default='', help='РЎС‚СЂР°РЅРёС†С‹ РґР»СЏ РїСЂРµРґРѕР±СЂР°Р±РѕС‚РєРё: "1-10" РёР»Рё "1,3,5-7" (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: РІСЃРµ)')
     
-    # Этап 1: Извлечение структуры (обязательно)
-    parser.add_argument('--two-columns', action='store_true', help='PDF с двумя колонками на странице')
+    # Р­С‚Р°Рї 1: РР·РІР»РµС‡РµРЅРёРµ СЃС‚СЂСѓРєС‚СѓСЂС‹ (РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ)
+    parser.add_argument('--two-columns', action='store_true', help='PDF СЃ РґРІСѓРјСЏ РєРѕР»РѕРЅРєР°РјРё РЅР° СЃС‚СЂР°РЅРёС†Рµ')
     parser.add_argument('--ocr-engine', default='auto',
                         choices=['auto', 'pymupdf', 'easyocr', 'tesseract', 'doctr'],
-                        help='OCR-движок: auto (PyMuPDF + фоллбэк), pymupdf, easyocr, tesseract, doctr (по умолчанию: auto)')
+                        help='OCR-РґРІРёР¶РѕРє: auto (PyMuPDF + С„РѕР»Р»Р±СЌРє), pymupdf, easyocr, tesseract, doctr (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: auto)')
     parser.add_argument('--ocr-dpi', type=int, default=300,
-                        help='DPI рендеринга для OCR-движков (по умолчанию: 300)')
+                        help='DPI СЂРµРЅРґРµСЂРёРЅРіР° РґР»СЏ OCR-РґРІРёР¶РєРѕРІ (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 300)')
     parser.add_argument('--poetry', action='store_true',
-                        help='Принудительно считать все блоки (кроме заголовков) стихами — сохранять переносы строк')
+                        help='РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ СЃС‡РёС‚Р°С‚СЊ РІСЃРµ Р±Р»РѕРєРё (РєСЂРѕРјРµ Р·Р°РіРѕР»РѕРІРєРѕРІ) СЃС‚РёС…Р°РјРё вЂ” СЃРѕС…СЂР°РЅСЏС‚СЊ РїРµСЂРµРЅРѕСЃС‹ СЃС‚СЂРѕРє')
     
-    # Этап 2: Oldspelling (опционально)
-    parser.add_argument('--no-oldspelling', action='store_true', help='Пропустить применение правил старой орфографии')
+    # Р­С‚Р°Рї 2: Oldspelling (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
+    parser.add_argument('--no-oldspelling', action='store_true', help='РџСЂРѕРїСѓСЃС‚РёС‚СЊ РїСЂРёРјРµРЅРµРЅРёРµ РїСЂР°РІРёР» СЃС‚Р°СЂРѕР№ РѕСЂС„РѕРіСЂР°С„РёРё')
     
-    # Этап 3: Stanza токенизация (опционально)
-    parser.add_argument('--stanza-tokenize', action='store_true', help='Улучшить разбиение на предложения через Stanza')
-    parser.add_argument('--stanza-model', default='', help='Путь к модели Stanza (.pt файл)')
+    # Р­С‚Р°Рї 3: Stanza С‚РѕРєРµРЅРёР·Р°С†РёСЏ (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
+    parser.add_argument('--stanza-tokenize', action='store_true', help='РЈР»СѓС‡С€РёС‚СЊ СЂР°Р·Р±РёРµРЅРёРµ РЅР° РїСЂРµРґР»РѕР¶РµРЅРёСЏ С‡РµСЂРµР· Stanza')
+    parser.add_argument('--stanza-model', default='', help='РџСѓС‚СЊ Рє РјРѕРґРµР»Рё Stanza (.pt С„Р°Р№Р»)')
     
-    # Этап 4: Модернизация (всегда выполняется)
+    # Р­С‚Р°Рї 4: РњРѕРґРµСЂРЅРёР·Р°С†РёСЏ (РІСЃРµРіРґР° РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ)
     
-    # Этап 4.5: Десппейсинг — склейка разорванных пробелами слов (опционально)
-    parser.add_argument('--despace', action='store_true', help='Агрессивная склейка разорванных пробелами слов (для сканов старых книг с увеличенным кернингом)')
+    # Р­С‚Р°Рї 4.5: Р”РµСЃРїРїРµР№СЃРёРЅРі вЂ” СЃРєР»РµР№РєР° СЂР°Р·РѕСЂРІР°РЅРЅС‹С… РїСЂРѕР±РµР»Р°РјРё СЃР»РѕРІ (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
+    parser.add_argument('--despace', action='store_true', help='РђРіСЂРµСЃСЃРёРІРЅР°СЏ СЃРєР»РµР№РєР° СЂР°Р·РѕСЂРІР°РЅРЅС‹С… РїСЂРѕР±РµР»Р°РјРё СЃР»РѕРІ (РґР»СЏ СЃРєР°РЅРѕРІ СЃС‚Р°СЂС‹С… РєРЅРёРі СЃ СѓРІРµР»РёС‡РµРЅРЅС‹Рј РєРµСЂРЅРёРЅРіРѕРј)')
     
-    # Этап 4.6: Разбиение склеенных слов (опционально)
-    parser.add_argument('--word-split', action='store_true', help='Разбиение склеенных слов (обратный деспейсинг: "АфанасийНикитин" → "Афанасий Никитин")')
+    # Р­С‚Р°Рї 4.6: Р Р°Р·Р±РёРµРЅРёРµ СЃРєР»РµРµРЅРЅС‹С… СЃР»РѕРІ (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
+    parser.add_argument('--word-split', action='store_true', help='Р Р°Р·Р±РёРµРЅРёРµ СЃРєР»РµРµРЅРЅС‹С… СЃР»РѕРІ (РѕР±СЂР°С‚РЅС‹Р№ РґРµСЃРїРµР№СЃРёРЅРі: "РђС„Р°РЅР°СЃРёР№РќРёРєРёС‚РёРЅ" в†’ "РђС„Р°РЅР°СЃРёР№ РќРёРєРёС‚РёРЅ")')
     
-    # Этап 5: LanguageTool + YandexSpeller (опционально)
-    parser.add_argument('--lt-cloud', action='store_true', help='Использовать LanguageTool (облачная проверка)')
-    parser.add_argument('--yandex-speller', action='store_true', help='Дополнительно использовать Yandex.Speller (бесплатно)')
-    parser.add_argument('--chunk-size', type=int, default=6000, help='Размер чанка для LanguageTool (по умолчанию: 6000)')
+    # Р­С‚Р°Рї 5: LanguageTool + YandexSpeller (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
+    parser.add_argument('--lt-cloud', action='store_true', help='РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ LanguageTool (РѕР±Р»Р°С‡РЅР°СЏ РїСЂРѕРІРµСЂРєР°)')
+    parser.add_argument('--yandex-speller', action='store_true', help='Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ Yandex.Speller (Р±РµСЃРїР»Р°С‚РЅРѕ)')
+    parser.add_argument('--chunk-size', type=int, default=6000, help='Р Р°Р·РјРµСЂ С‡Р°РЅРєР° РґР»СЏ LanguageTool (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 6000)')
     
-    # Этап 6: LLM-коррекция через GigaChat (опционально, самый мощный инструмент)
-    parser.add_argument('--llm-correct', action='store_true', help='Коррекция текста через GigaChat')
-    parser.add_argument('--llm-model', default='', help='Модель GigaChat (по умолчанию: GigaChat)')
-    parser.add_argument('--llm-api-key', default='', help='GIGACHAT_CREDENTIALS (или через env)')
-    parser.add_argument('--llm-chunk-size', type=int, default=3000, help='Размер чанка для LLM (по умолчанию: 3000)')
-    parser.add_argument('--llm-cautious', action='store_true', help='Осторожный режим LLM: не менять сомнительные слова, а вынести их в doubt_words.txt')
-    parser.add_argument('--llm-old-russian', action='store_true', help='Режим для старорусских/древнерусских текстов: агрессивная склейка разорванных слов, сохранение архаизмов')
-    parser.add_argument('--llm-user-context', default='', help='Дополнительный контекст для LLM (напр. "Текст из «Хождения за три моря» XV века")')
-    parser.add_argument('--llm-overlap-chars', type=int, default=0, help='Нахлёст для LLM: хвост предыдущего чанка (символы) как read-only контекст (по умолчанию: 0)')
-    parser.add_argument('--llm-overlap-paragraphs', type=int, default=0, help='Нахлёст для LLM по абзацам (предпочтительнее символов, по умолчанию: 0)')
-    parser.add_argument('--llm-book-memory', action='store_true', help='LLM: включить “память книги” (подтягивать похожие места из других частей текста для согласованности имён/терминов)')
-    parser.add_argument('--llm-memory-topk', type=int, default=3, help='LLM память книги: сколько похожих фрагментов добавлять (по умолчанию: 3)')
-    parser.add_argument('--llm-memory-exclude-window', type=int, default=20, help='LLM память книги: исключать абзацы рядом с текущим чанком (по обе стороны, по умолчанию: 20)')
-    parser.add_argument('--llm-memory-max-chars', type=int, default=1200, help='LLM память книги: лимит на объём retrieval-контекста (символы, по умолчанию: 1200)')
+    # Р­С‚Р°Рї 6: LLM-РєРѕСЂСЂРµРєС†РёСЏ С‡РµСЂРµР· GigaChat (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ, СЃР°РјС‹Р№ РјРѕС‰РЅС‹Р№ РёРЅСЃС‚СЂСѓРјРµРЅС‚)
+    parser.add_argument('--llm-correct', action='store_true', help='РљРѕСЂСЂРµРєС†РёСЏ С‚РµРєСЃС‚Р° С‡РµСЂРµР· GigaChat')
+    parser.add_argument('--llm-model', default='', help='РњРѕРґРµР»СЊ GigaChat (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: GigaChat)')
+    parser.add_argument('--llm-api-key', default='', help='GIGACHAT_CREDENTIALS (РёР»Рё С‡РµСЂРµР· env)')
+    parser.add_argument('--llm-chunk-size', type=int, default=3000, help='Р Р°Р·РјРµСЂ С‡Р°РЅРєР° РґР»СЏ LLM (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 3000)')
+    parser.add_argument('--llm-cautious', action='store_true', help='РћСЃС‚РѕСЂРѕР¶РЅС‹Р№ СЂРµР¶РёРј LLM: РЅРµ РјРµРЅСЏС‚СЊ СЃРѕРјРЅРёС‚РµР»СЊРЅС‹Рµ СЃР»РѕРІР°, Р° РІС‹РЅРµСЃС‚Рё РёС… РІ doubt_words.txt')
+    parser.add_argument('--llm-old-russian', action='store_true', help='Р РµР¶РёРј РґР»СЏ СЃС‚Р°СЂРѕСЂСѓСЃСЃРєРёС…/РґСЂРµРІРЅРµСЂСѓСЃСЃРєРёС… С‚РµРєСЃС‚РѕРІ: Р°РіСЂРµСЃСЃРёРІРЅР°СЏ СЃРєР»РµР№РєР° СЂР°Р·РѕСЂРІР°РЅРЅС‹С… СЃР»РѕРІ, СЃРѕС…СЂР°РЅРµРЅРёРµ Р°СЂС…Р°РёР·РјРѕРІ')
+    parser.add_argument('--llm-user-context', default='', help='Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Р№ РєРѕРЅС‚РµРєСЃС‚ РґР»СЏ LLM (РЅР°РїСЂ. "РўРµРєСЃС‚ РёР· В«РҐРѕР¶РґРµРЅРёСЏ Р·Р° С‚СЂРё РјРѕСЂСЏВ» XV РІРµРєР°")')
+    parser.add_argument('--llm-overlap-chars', type=int, default=0, help='РќР°С…Р»С‘СЃС‚ РґР»СЏ LLM: С…РІРѕСЃС‚ РїСЂРµРґС‹РґСѓС‰РµРіРѕ С‡Р°РЅРєР° (СЃРёРјРІРѕР»С‹) РєР°Рє read-only РєРѕРЅС‚РµРєСЃС‚ (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 0)')
+    parser.add_argument('--llm-overlap-paragraphs', type=int, default=0, help='РќР°С…Р»С‘СЃС‚ РґР»СЏ LLM РїРѕ Р°Р±Р·Р°С†Р°Рј (РїСЂРµРґРїРѕС‡С‚РёС‚РµР»СЊРЅРµРµ СЃРёРјРІРѕР»РѕРІ, РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 0)')
+    parser.add_argument('--llm-book-memory', action='store_true', help='LLM: РІРєР»СЋС‡РёС‚СЊ вЂњРїР°РјСЏС‚СЊ РєРЅРёРіРёвЂќ (РїРѕРґС‚СЏРіРёРІР°С‚СЊ РїРѕС…РѕР¶РёРµ РјРµСЃС‚Р° РёР· РґСЂСѓРіРёС… С‡Р°СЃС‚РµР№ С‚РµРєСЃС‚Р° РґР»СЏ СЃРѕРіР»Р°СЃРѕРІР°РЅРЅРѕСЃС‚Рё РёРјС‘РЅ/С‚РµСЂРјРёРЅРѕРІ)')
+    parser.add_argument('--llm-memory-topk', type=int, default=3, help='LLM РїР°РјСЏС‚СЊ РєРЅРёРіРё: СЃРєРѕР»СЊРєРѕ РїРѕС…РѕР¶РёС… С„СЂР°РіРјРµРЅС‚РѕРІ РґРѕР±Р°РІР»СЏС‚СЊ (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 3)')
+    parser.add_argument('--llm-memory-exclude-window', type=int, default=20, help='LLM РїР°РјСЏС‚СЊ РєРЅРёРіРё: РёСЃРєР»СЋС‡Р°С‚СЊ Р°Р±Р·Р°С†С‹ СЂСЏРґРѕРј СЃ С‚РµРєСѓС‰РёРј С‡Р°РЅРєРѕРј (РїРѕ РѕР±Рµ СЃС‚РѕСЂРѕРЅС‹, РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 20)')
+    parser.add_argument('--llm-memory-max-chars', type=int, default=1200, help='LLM РїР°РјСЏС‚СЊ РєРЅРёРіРё: Р»РёРјРёС‚ РЅР° РѕР±СЉС‘Рј retrieval-РєРѕРЅС‚РµРєСЃС‚Р° (СЃРёРјРІРѕР»С‹, РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 1200)')
     
-    # Этап 7: Контекстная проверка (опционально)
-    parser.add_argument('--context-check', action='store_true', help='Контекстная проверка (местоимение+глагол)')
-    parser.add_argument('--context-out', default='context_warnings.txt', help='Файл с предупреждениями контекстной проверки')
-    parser.add_argument('--context-pronouns', default='он,она,оно,они,мы,вы,ты', help='Местоимения для контекстной проверки')
+    # Р­С‚Р°Рї 7: РљРѕРЅС‚РµРєСЃС‚РЅР°СЏ РїСЂРѕРІРµСЂРєР° (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
+    parser.add_argument('--context-check', action='store_true', help='РљРѕРЅС‚РµРєСЃС‚РЅР°СЏ РїСЂРѕРІРµСЂРєР° (РјРµСЃС‚РѕРёРјРµРЅРёРµ+РіР»Р°РіРѕР»)')
+    parser.add_argument('--context-out', default='context_warnings.txt', help='Р¤Р°Р№Р» СЃ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏРјРё РєРѕРЅС‚РµРєСЃС‚РЅРѕР№ РїСЂРѕРІРµСЂРєРё')
+    parser.add_argument('--context-pronouns', default='РѕРЅ,РѕРЅР°,РѕРЅРѕ,РѕРЅРё,РјС‹,РІС‹,С‚С‹', help='РњРµСЃС‚РѕРёРјРµРЅРёСЏ РґР»СЏ РєРѕРЅС‚РµРєСЃС‚РЅРѕР№ РїСЂРѕРІРµСЂРєРё')
     
-    # Этап 8: Пост-очистка (опционально)
-    parser.add_argument('--post-clean', action='store_true', help='Пост-очистка: склейка букв через пробел, исправление разорванных слов, латиница→кириллица')
+    # Р­С‚Р°Рї 8: РџРѕСЃС‚-РѕС‡РёСЃС‚РєР° (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
+    parser.add_argument('--post-clean', action='store_true', help='РџРѕСЃС‚-РѕС‡РёСЃС‚РєР°: СЃРєР»РµР№РєР° Р±СѓРєРІ С‡РµСЂРµР· РїСЂРѕР±РµР», РёСЃРїСЂР°РІР»РµРЅРёРµ СЂР°Р·РѕСЂРІР°РЅРЅС‹С… СЃР»РѕРІ, Р»Р°С‚РёРЅРёС†Р°в†’РєРёСЂРёР»Р»РёС†Р°')
     
-    # Этап 9: Генерация EPUB (опционально)
-    parser.add_argument('--epub-template', nargs='?', const='sample.epub', help='Путь к шаблону EPUB (по умолчанию: sample.epub). Если указан, генерирует EPUB')
-    parser.add_argument('--cover-colors', default='', help='Пять HEX-цветов через запятую (полоска, верхний блок, заголовок, градиент начало, градиент конец)')
-    parser.add_argument('--epub-max-chapter-size', type=int, default=50, help='Максимальный размер главы/секции в KB (по умолчанию: 50)')
-    parser.add_argument('--epub-use-chapter-heads', action='store_true', help='Использовать поиск заголовков для разделения на главы (по умолчанию: простое разделение по размеру)')
+    # Р­С‚Р°Рї 9: Р“РµРЅРµСЂР°С†РёСЏ EPUB (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
+    parser.add_argument('--epub-template', nargs='?', const='sample.epub', help='РџСѓС‚СЊ Рє С€Р°Р±Р»РѕРЅСѓ EPUB (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: sample.epub). Р•СЃР»Рё СѓРєР°Р·Р°РЅ, РіРµРЅРµСЂРёСЂСѓРµС‚ EPUB')
+    parser.add_argument('--cover-colors', default='', help='РџСЏС‚СЊ HEX-С†РІРµС‚РѕРІ С‡РµСЂРµР· Р·Р°РїСЏС‚СѓСЋ (РїРѕР»РѕСЃРєР°, РІРµСЂС…РЅРёР№ Р±Р»РѕРє, Р·Р°РіРѕР»РѕРІРѕРє, РіСЂР°РґРёРµРЅС‚ РЅР°С‡Р°Р»Рѕ, РіСЂР°РґРёРµРЅС‚ РєРѕРЅРµС†)')
+    parser.add_argument('--epub-max-chapter-size', type=int, default=50, help='РњР°РєСЃРёРјР°Р»СЊРЅС‹Р№ СЂР°Р·РјРµСЂ РіР»Р°РІС‹/СЃРµРєС†РёРё РІ KB (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: 50)')
+    parser.add_argument('--epub-use-chapter-heads', action='store_true', help='РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РїРѕРёСЃРє Р·Р°РіРѕР»РѕРІРєРѕРІ РґР»СЏ СЂР°Р·РґРµР»РµРЅРёСЏ РЅР° РіР»Р°РІС‹ (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: РїСЂРѕСЃС‚РѕРµ СЂР°Р·РґРµР»РµРЅРёРµ РїРѕ СЂР°Р·РјРµСЂСѓ)')
     
-    # Дополнительные проверки (параллельно)
-    parser.add_argument('--natasha-check', action='store_true', help='Проверка именованных сущностей через Natasha')
-    parser.add_argument('--natasha-types', default='PER,LOC', help='Типы сущностей для Natasha (PER, LOC, ORG)')
-    parser.add_argument('--natasha-out', default='natasha_diff.txt', help='Файл отчета Natasha проверки')
-    parser.add_argument('--natasha-sync', action='store_true', help='Синхронизация именованных сущностей через Natasha')
-    parser.add_argument('--natasha-sync-report', default='natasha_sync.txt', help='Файл отчета Natasha синхронизации')
+    # Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ РїСЂРѕРІРµСЂРєРё (РїР°СЂР°Р»Р»РµР»СЊРЅРѕ)
+    parser.add_argument('--natasha-check', action='store_true', help='РџСЂРѕРІРµСЂРєР° РёРјРµРЅРѕРІР°РЅРЅС‹С… СЃСѓС‰РЅРѕСЃС‚РµР№ С‡РµСЂРµР· Natasha')
+    parser.add_argument('--natasha-types', default='PER,LOC', help='РўРёРїС‹ СЃСѓС‰РЅРѕСЃС‚РµР№ РґР»СЏ Natasha (PER, LOC, ORG)')
+    parser.add_argument('--natasha-out', default='natasha_diff.txt', help='Р¤Р°Р№Р» РѕС‚С‡РµС‚Р° Natasha РїСЂРѕРІРµСЂРєРё')
+    parser.add_argument('--natasha-sync', action='store_true', help='РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РёРјРµРЅРѕРІР°РЅРЅС‹С… СЃСѓС‰РЅРѕСЃС‚РµР№ С‡РµСЂРµР· Natasha')
+    parser.add_argument('--natasha-sync-report', default='natasha_sync.txt', help='Р¤Р°Р№Р» РѕС‚С‡РµС‚Р° Natasha СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё')
     
     args = parser.parse_args()
 
@@ -166,7 +166,7 @@ def main():
         if not _has_any(*flags):
             setattr(args, attr, value)
 
-    # Профили качества (ставим только если пользователь не задавал флаги явно)
+    # РџСЂРѕС„РёР»Рё РєР°С‡РµСЃС‚РІР° (СЃС‚Р°РІРёРј С‚РѕР»СЊРєРѕ РµСЃР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ Р·Р°РґР°РІР°Р» С„Р»Р°РіРё СЏРІРЅРѕ)
     if args.profile == 'fast':
         _set_default('llm_correct', False, '--llm-correct')
         _set_default('lt_cloud', False, '--lt-cloud')
@@ -180,7 +180,7 @@ def main():
     elif args.profile == 'scan-old':
         _set_default('preprocess', True, '--preprocess')
         _set_default('ocr_engine', 'easyocr', '--ocr-engine')
-        _set_default('llm_correct', True, '--llm-correct')
+        _set_default('llm_correct', False, '--llm-correct')
         _set_default('llm_old_russian', True, '--llm-old-russian')
         _set_default('llm_chunk_size', 4500, '--llm-chunk-size')
         _set_default('llm_overlap_paragraphs', 1, '--llm-overlap-paragraphs')
@@ -189,7 +189,7 @@ def main():
     elif args.profile == 'prose':
         _set_default('lt_cloud', True, '--lt-cloud')
         _set_default('yandex_speller', True, '--yandex-speller')
-        _set_default('llm_correct', True, '--llm-correct')
+        _set_default('llm_correct', False, '--llm-correct')
         _set_default('llm_chunk_size', 5000, '--llm-chunk-size')
         _set_default('llm_overlap_paragraphs', 1, '--llm-overlap-paragraphs')
         _set_default('llm_book_memory', True, '--llm-book-memory')
@@ -202,27 +202,27 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     
-    # Проверяем наличие PDF
+    # РџСЂРѕРІРµСЂСЏРµРј РЅР°Р»РёС‡РёРµ PDF
     pdf_path = Path(args.pdf)
     if not pdf_path.exists():
-        print(f"❌ Ошибка: PDF файл не найден: {pdf_path}")
+        print(f"вќЊ РћС€РёР±РєР°: PDF С„Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ: {pdf_path}")
         return 1
     
     print("=" * 80)
-    print("ПАЙПЛАЙН: PDF → EPUB")
+    print("РџРђР™РџР›РђР™Рќ: PDF в†’ EPUB")
     print("=" * 80)
     print(f"PDF: {pdf_path}")
-    print(f"Название: {args.title}")
+    print(f"РќР°Р·РІР°РЅРёРµ: {args.title}")
     if args.author:
-        print(f"Автор: {args.author}")
-    print(f"Папка результатов: {outdir}")
-    print("\nЭтапы обработки:")
+        print(f"РђРІС‚РѕСЂ: {args.author}")
+    print(f"РџР°РїРєР° СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ: {outdir}")
+    print("\nР­С‚Р°РїС‹ РѕР±СЂР°Р±РѕС‚РєРё:")
     
     step_num = 1
     
-    # Этап 0: Предобработка PDF (опционально)
+    # Р­С‚Р°Рї 0: РџСЂРµРґРѕР±СЂР°Р±РѕС‚РєР° PDF (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.preprocess:
-        print(f"  0. Предобработка PDF (улучшение качества скана)")
+        print(f"  0. РџСЂРµРґРѕР±СЂР°Р±РѕС‚РєР° PDF (СѓР»СѓС‡С€РµРЅРёРµ РєР°С‡РµСЃС‚РІР° СЃРєР°РЅР°)")
         
         preprocess_output = outdir / f"{pdf_path.stem}_preprocessed.pdf"
         preprocess_cmd = [
@@ -238,21 +238,21 @@ def main():
         if args.preprocess_pages:
             preprocess_cmd.extend(["--pages", args.preprocess_pages])
         
-        if not run_cmd(preprocess_cmd, "Этап 0: Предобработка PDF"):
+        if not run_cmd(preprocess_cmd, "Р­С‚Р°Рї 0: РџСЂРµРґРѕР±СЂР°Р±РѕС‚РєР° PDF"):
             return 1
         
-        # Используем предобработанный PDF для дальнейших этапов
+        # РСЃРїРѕР»СЊР·СѓРµРј РїСЂРµРґРѕР±СЂР°Р±РѕС‚Р°РЅРЅС‹Р№ PDF РґР»СЏ РґР°Р»СЊРЅРµР№С€РёС… СЌС‚Р°РїРѕРІ
         if preprocess_output.exists():
             pdf_path = preprocess_output
-            print(f"  Используется предобработанный PDF: {pdf_path}")
+            print(f"  РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РїСЂРµРґРѕР±СЂР°Р±РѕС‚Р°РЅРЅС‹Р№ PDF: {pdf_path}")
         else:
-            print(f"⚠️  Предупреждение: предобработанный PDF не создан, используем оригинал")
+            print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: РїСЂРµРґРѕР±СЂР°Р±РѕС‚Р°РЅРЅС‹Р№ PDF РЅРµ СЃРѕР·РґР°РЅ, РёСЃРїРѕР»СЊР·СѓРµРј РѕСЂРёРіРёРЅР°Р»")
     
-    # Этап 1: Извлечение структуры из PDF
+    # Р­С‚Р°Рї 1: РР·РІР»РµС‡РµРЅРёРµ СЃС‚СЂСѓРєС‚СѓСЂС‹ РёР· PDF
     engine = getattr(args, 'ocr_engine', 'auto')
     ocr_dpi = getattr(args, 'ocr_dpi', 300)
-    engine_label = engine if engine != 'auto' else 'auto (PyMuPDF + OCR-фоллбэк)'
-    print(f"  {step_num}. Извлечение структуры из PDF (движок: {engine_label})")
+    engine_label = engine if engine != 'auto' else 'auto (PyMuPDF + OCR-С„РѕР»Р»Р±СЌРє)'
+    print(f"  {step_num}. РР·РІР»РµС‡РµРЅРёРµ СЃС‚СЂСѓРєС‚СѓСЂС‹ РёР· PDF (РґРІРёР¶РѕРє: {engine_label})")
     step_num += 1
 
     if engine in ('easyocr', 'tesseract', 'doctr') or engine == 'auto':
@@ -268,7 +268,7 @@ def main():
             ocr_cmd.append("--two-columns")
         if args.poetry:
             ocr_cmd.append("--poetry")
-        if not run_cmd(ocr_cmd, f"Этап 1: Извлечение структуры (OCR: {engine})"):
+        if not run_cmd(ocr_cmd, f"Р­С‚Р°Рї 1: РР·РІР»РµС‡РµРЅРёРµ СЃС‚СЂСѓРєС‚СѓСЂС‹ (OCR: {engine})"):
             return 1
     else:
         extract_cmd = [
@@ -281,15 +281,15 @@ def main():
             extract_cmd.append("--two-columns")
         if args.poetry:
             extract_cmd.append("--poetry")
-        if not run_cmd(extract_cmd, f"Этап 1: Извлечение структуры (PyMuPDF)"):
+        if not run_cmd(extract_cmd, f"Р­С‚Р°Рї 1: РР·РІР»РµС‡РµРЅРёРµ СЃС‚СЂСѓРєС‚СѓСЂС‹ (PyMuPDF)"):
             return 1
 
-    # Определяем входной файл для следующих этапов
+    # РћРїСЂРµРґРµР»СЏРµРј РІС…РѕРґРЅРѕР№ С„Р°Р№Р» РґР»СЏ СЃР»РµРґСѓСЋС‰РёС… СЌС‚Р°РїРѕРІ
     structured_in = outdir / "structured.json"
     
-    # Этап 2: Применение правил oldspelling (опционально)
+    # Р­С‚Р°Рї 2: РџСЂРёРјРµРЅРµРЅРёРµ РїСЂР°РІРёР» oldspelling (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if not args.no_oldspelling:
-        print(f"  {step_num}. Применение правил старой орфографии")
+        print(f"  {step_num}. РџСЂРёРјРµРЅРµРЅРёРµ РїСЂР°РІРёР» СЃС‚Р°СЂРѕР№ РѕСЂС„РѕРіСЂР°С„РёРё")
         step_num += 1
         
         apply_cmd = [
@@ -299,14 +299,14 @@ def main():
             "--in", str(structured_in),
             "--out", str(outdir / "structured_rules.json")
         ]
-        if not run_cmd(apply_cmd, f"Этап 2: Применение правил oldspelling"):
+        if not run_cmd(apply_cmd, f"Р­С‚Р°Рї 2: РџСЂРёРјРµРЅРµРЅРёРµ РїСЂР°РІРёР» oldspelling"):
             return 1
         
         structured_in = outdir / "structured_rules.json"
     
-    # Этап 3: Stanza токенизация (опционально)
+    # Р­С‚Р°Рї 3: Stanza С‚РѕРєРµРЅРёР·Р°С†РёСЏ (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.stanza_tokenize and args.stanza_model:
-        print(f"  {step_num}. Stanza токенизация")
+        print(f"  {step_num}. Stanza С‚РѕРєРµРЅРёР·Р°С†РёСЏ")
         step_num += 1
         
         stanza_cmd = [
@@ -316,13 +316,13 @@ def main():
             "--out", str(outdir / "structured_tokenized.json"),
             "--model", args.stanza_model
         ]
-        if not run_cmd(stanza_cmd, f"Этап 3: Stanza токенизация"):
+        if not run_cmd(stanza_cmd, f"Р­С‚Р°Рї 3: Stanza С‚РѕРєРµРЅРёР·Р°С†РёСЏ"):
             return 1
         
         structured_in = outdir / "structured_tokenized.json"
     
-    # Этап 4: Модернизация (всегда выполняется)
-    print(f"  {step_num}. Модернизация орфографии")
+    # Р­С‚Р°Рї 4: РњРѕРґРµСЂРЅРёР·Р°С†РёСЏ (РІСЃРµРіРґР° РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ)
+    print(f"  {step_num}. РњРѕРґРµСЂРЅРёР·Р°С†РёСЏ РѕСЂС„РѕРіСЂР°С„РёРё")
     step_num += 1
     
     modernize_cmd = [
@@ -332,19 +332,19 @@ def main():
         "--outdir", str(outdir),
         "--title", args.title
     ]
-    if not run_cmd(modernize_cmd, f"Этап 4: Модернизация орфографии"):
+    if not run_cmd(modernize_cmd, f"Р­С‚Р°Рї 4: РњРѕРґРµСЂРЅРёР·Р°С†РёСЏ РѕСЂС„РѕРіСЂР°С„РёРё"):
         return 1
     
-    # Определяем входной файл для проверок орфографии
+    # РћРїСЂРµРґРµР»СЏРµРј РІС…РѕРґРЅРѕР№ С„Р°Р№Р» РґР»СЏ РїСЂРѕРІРµСЂРѕРє РѕСЂС„РѕРіСЂР°С„РёРё
     spell_input = outdir / "final.txt"
     
-    # Этап 4.5: Десппейсинг (опционально)
+    # Р­С‚Р°Рї 4.5: Р”РµСЃРїРїРµР№СЃРёРЅРі (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.despace:
-        print(f"  {step_num}. Десппейсинг (склейка разорванных слов)")
+        print(f"  {step_num}. Р”РµСЃРїРїРµР№СЃРёРЅРі (СЃРєР»РµР№РєР° СЂР°Р·РѕСЂРІР°РЅРЅС‹С… СЃР»РѕРІ)")
         step_num += 1
         
         if not spell_input.exists():
-            print(f"⚠️  Предупреждение: {spell_input.name} не найден — десппейсинг пропущен")
+            print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: {spell_input.name} РЅРµ РЅР°Р№РґРµРЅ вЂ” РґРµСЃРїРїРµР№СЃРёРЅРі РїСЂРѕРїСѓС‰РµРЅ")
         else:
             despace_out = outdir / "final_despaced.txt"
             despace_cmd = [
@@ -354,19 +354,19 @@ def main():
                 "--out", str(despace_out),
                 "--title", args.title + " (Despaced)",
             ]
-            if not run_cmd(despace_cmd, f"Этап 4.5: Десппейсинг"):
+            if not run_cmd(despace_cmd, f"Р­С‚Р°Рї 4.5: Р”РµСЃРїРїРµР№СЃРёРЅРі"):
                 return 1
             
             if despace_out.exists():
                 spell_input = despace_out
     
-    # Этап 4.6: Разбиение склеенных слов (опционально)
+    # Р­С‚Р°Рї 4.6: Р Р°Р·Р±РёРµРЅРёРµ СЃРєР»РµРµРЅРЅС‹С… СЃР»РѕРІ (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.word_split:
-        print(f"  {step_num}. Разбиение склеенных слов (word splitting)")
+        print(f"  {step_num}. Р Р°Р·Р±РёРµРЅРёРµ СЃРєР»РµРµРЅРЅС‹С… СЃР»РѕРІ (word splitting)")
         step_num += 1
         
         if not spell_input.exists():
-            print(f"⚠️  Предупреждение: {spell_input.name} не найден — word splitting пропущен")
+            print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: {spell_input.name} РЅРµ РЅР°Р№РґРµРЅ вЂ” word splitting РїСЂРѕРїСѓС‰РµРЅ")
         else:
             wsplit_out = outdir / "final_wsplit.txt"
             wsplit_cmd = [
@@ -376,24 +376,24 @@ def main():
                 "--out", str(wsplit_out),
                 "--title", args.title + " (Word Split)",
             ]
-            if not run_cmd(wsplit_cmd, f"Этап 4.6: Разбиение склеенных слов"):
+            if not run_cmd(wsplit_cmd, f"Р­С‚Р°Рї 4.6: Р Р°Р·Р±РёРµРЅРёРµ СЃРєР»РµРµРЅРЅС‹С… СЃР»РѕРІ"):
                 return 1
             
             if wsplit_out.exists():
                 spell_input = wsplit_out
     
-    # Этап 5: LanguageTool + YandexSpeller (опционально)
+    # Р­С‚Р°Рї 5: LanguageTool + YandexSpeller (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.lt_cloud or args.yandex_speller:
         checkers_desc = []
         if args.lt_cloud:
             checkers_desc.append("LanguageTool")
         if args.yandex_speller:
             checkers_desc.append("Yandex.Speller")
-        print(f"  {step_num}. Проверка: {' + '.join(checkers_desc)}")
+        print(f"  {step_num}. РџСЂРѕРІРµСЂРєР°: {' + '.join(checkers_desc)}")
         step_num += 1
         
         if not spell_input.exists():
-            print(f"⚠️  Предупреждение: {spell_input.name} не найден — проверка пропущена")
+            print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: {spell_input.name} РЅРµ РЅР°Р№РґРµРЅ вЂ” РїСЂРѕРІРµСЂРєР° РїСЂРѕРїСѓС‰РµРЅР°")
         else:
             lt_cmd = [
                 sys.executable,
@@ -408,21 +408,21 @@ def main():
                 lt_cmd.append("--yandex-speller")
             if not args.lt_cloud:
                 lt_cmd.append("--no-lt")
-            if not run_cmd(lt_cmd, f"Этап 5: {' + '.join(checkers_desc)}"):
+            if not run_cmd(lt_cmd, f"Р­С‚Р°Рї 5: {' + '.join(checkers_desc)}"):
                 return 1
             
-            # Обновляем входной файл для следующего этапа
+            # РћР±РЅРѕРІР»СЏРµРј РІС…РѕРґРЅРѕР№ С„Р°Р№Р» РґР»СЏ СЃР»РµРґСѓСЋС‰РµРіРѕ СЌС‚Р°РїР°
             lt_output = outdir / "final_clean.txt"
             if lt_output.exists():
                 spell_input = lt_output
     
-    # Этап 6: LLM-коррекция через GigaChat (опционально)
+    # Р­С‚Р°Рї 6: LLM-РєРѕСЂСЂРµРєС†РёСЏ С‡РµСЂРµР· GigaChat (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.llm_correct:
-        print(f"  {step_num}. LLM-коррекция (GigaChat)")
+        print(f"  {step_num}. LLM-РєРѕСЂСЂРµРєС†РёСЏ (GigaChat)")
         step_num += 1
         
         if not spell_input.exists():
-            print(f"⚠️  Предупреждение: {spell_input.name} не найден — LLM-коррекция пропущена")
+            print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: {spell_input.name} РЅРµ РЅР°Р№РґРµРЅ вЂ” LLM-РєРѕСЂСЂРµРєС†РёСЏ РїСЂРѕРїСѓС‰РµРЅР°")
         else:
             llm_cmd = [
                 sys.executable,
@@ -452,23 +452,23 @@ def main():
                 llm_cmd.extend(["--memory-topk", str(args.llm_memory_topk)])
                 llm_cmd.extend(["--memory-exclude-window", str(args.llm_memory_exclude_window)])
                 llm_cmd.extend(["--memory-max-chars", str(args.llm_memory_max_chars)])
-            if not run_cmd(llm_cmd, f"Этап 6: LLM-коррекция (GigaChat)"):
+            if not run_cmd(llm_cmd, f"Р­С‚Р°Рї 6: LLM-РєРѕСЂСЂРµРєС†РёСЏ (GigaChat)"):
                 return 1
             
-            # Обновляем входной файл для следующего этапа
+            # РћР±РЅРѕРІР»СЏРµРј РІС…РѕРґРЅРѕР№ С„Р°Р№Р» РґР»СЏ СЃР»РµРґСѓСЋС‰РµРіРѕ СЌС‚Р°РїР°
             llm_output = outdir / "final_llm.txt"
             if llm_output.exists():
                 spell_input = llm_output
     
-    # Этап 7: Контекстная проверка (опционально)
+    # Р­С‚Р°Рї 7: РљРѕРЅС‚РµРєСЃС‚РЅР°СЏ РїСЂРѕРІРµСЂРєР° (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.context_check:
-        print(f"  {step_num}. Контекстная проверка")
+        print(f"  {step_num}. РљРѕРЅС‚РµРєСЃС‚РЅР°СЏ РїСЂРѕРІРµСЂРєР°")
         step_num += 1
         
-        # Используем лучший доступный файл
+        # РСЃРїРѕР»СЊР·СѓРµРј Р»СѓС‡С€РёР№ РґРѕСЃС‚СѓРїРЅС‹Р№ С„Р°Р№Р»
         context_input = spell_input
         if not context_input.exists():
-            print(f"⚠️  Предупреждение: {context_input.name} не найден — контекстная проверка пропущена")
+            print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: {context_input.name} РЅРµ РЅР°Р№РґРµРЅ вЂ” РєРѕРЅС‚РµРєСЃС‚РЅР°СЏ РїСЂРѕРІРµСЂРєР° РїСЂРѕРїСѓС‰РµРЅР°")
         else:
             context_cmd = [
                 sys.executable,
@@ -477,19 +477,19 @@ def main():
                 "--out", str(outdir / args.context_out),
                 "--pronouns", args.context_pronouns
             ]
-            if not run_cmd(context_cmd, f"Этап 7: Контекстная проверка"):
+            if not run_cmd(context_cmd, f"Р­С‚Р°Рї 7: РљРѕРЅС‚РµРєСЃС‚РЅР°СЏ РїСЂРѕРІРµСЂРєР°"):
                 return 1
     
-    # Этап 8: Пост-очистка (опционально)
+    # Р­С‚Р°Рї 8: РџРѕСЃС‚-РѕС‡РёСЃС‚РєР° (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.post_clean:
-        print(f"  {step_num}. Пост-очистка")
+        print(f"  {step_num}. РџРѕСЃС‚-РѕС‡РёСЃС‚РєР°")
         step_num += 1
         
-        # Используем лучший доступный файл
+        # РСЃРїРѕР»СЊР·СѓРµРј Р»СѓС‡С€РёР№ РґРѕСЃС‚СѓРїРЅС‹Р№ С„Р°Р№Р»
         post_clean_input = spell_input
         
         if not post_clean_input.exists():
-            print(f"⚠️  Предупреждение: {post_clean_input.name} не найден — пост-очистка пропущена")
+            print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: {post_clean_input.name} РЅРµ РЅР°Р№РґРµРЅ вЂ” РїРѕСЃС‚-РѕС‡РёСЃС‚РєР° РїСЂРѕРїСѓС‰РµРЅР°")
         else:
             post_clean_cmd = [
                 sys.executable,
@@ -502,20 +502,20 @@ def main():
             if args.poetry:
                 post_clean_cmd.append("--preserve-newlines")
             
-            if not run_cmd(post_clean_cmd, f"Этап 8: Пост-очистка"):
+            if not run_cmd(post_clean_cmd, f"Р­С‚Р°Рї 8: РџРѕСЃС‚-РѕС‡РёСЃС‚РєР°"):
                 return 1
     
-    # Natasha проверки (параллельно, после всех коррекций)
+    # Natasha РїСЂРѕРІРµСЂРєРё (РїР°СЂР°Р»Р»РµР»СЊРЅРѕ, РїРѕСЃР»Рµ РІСЃРµС… РєРѕСЂСЂРµРєС†РёР№)
     if args.natasha_check:
         natasha_input = spell_input
         if natasha_input.exists():
-            # Убеждаемся, что путь к выходному файлу не содержит дублирования outdir
+            # РЈР±РµР¶РґР°РµРјСЃСЏ, С‡С‚Рѕ РїСѓС‚СЊ Рє РІС‹С…РѕРґРЅРѕРјСѓ С„Р°Р№Р»Сѓ РЅРµ СЃРѕРґРµСЂР¶РёС‚ РґСѓР±Р»РёСЂРѕРІР°РЅРёСЏ outdir
             natasha_out_path = Path(args.natasha_out)
-            # Если путь уже содержит outdir в начале, убираем его
+            # Р•СЃР»Рё РїСѓС‚СЊ СѓР¶Рµ СЃРѕРґРµСЂР¶РёС‚ outdir РІ РЅР°С‡Р°Р»Рµ, СѓР±РёСЂР°РµРј РµРіРѕ
             natasha_out_str = str(natasha_out_path)
             outdir_str = str(outdir)
             if natasha_out_str.startswith(outdir_str):
-                # Убираем префикс outdir и ведущие слеши
+                # РЈР±РёСЂР°РµРј РїСЂРµС„РёРєСЃ outdir Рё РІРµРґСѓС‰РёРµ СЃР»РµС€Рё
                 relative_path = natasha_out_str[len(outdir_str):].lstrip('\\/')
                 natasha_out = outdir / relative_path if relative_path else outdir / natasha_out_path.name
             elif natasha_out_path.is_absolute():
@@ -523,7 +523,7 @@ def main():
             else:
                 natasha_out = outdir / natasha_out_path
             
-            # Создаем директорию для выходного файла, если её нет
+            # РЎРѕР·РґР°РµРј РґРёСЂРµРєС‚РѕСЂРёСЋ РґР»СЏ РІС‹С…РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р°, РµСЃР»Рё РµС‘ РЅРµС‚
             natasha_out.parent.mkdir(parents=True, exist_ok=True)
             
             natasha_cmd = [
@@ -534,18 +534,18 @@ def main():
                 "--out", str(natasha_out),
                 "--types", args.natasha_types
             ]
-            run_cmd(natasha_cmd, "Natasha проверка именованных сущностей")
+            run_cmd(natasha_cmd, "Natasha РїСЂРѕРІРµСЂРєР° РёРјРµРЅРѕРІР°РЅРЅС‹С… СЃСѓС‰РЅРѕСЃС‚РµР№")
     
     if args.natasha_sync:
         natasha_input = spell_input
         if natasha_input.exists():
-            # Убеждаемся, что путь к отчету не содержит дублирования outdir
+            # РЈР±РµР¶РґР°РµРјСЃСЏ, С‡С‚Рѕ РїСѓС‚СЊ Рє РѕС‚С‡РµС‚Сѓ РЅРµ СЃРѕРґРµСЂР¶РёС‚ РґСѓР±Р»РёСЂРѕРІР°РЅРёСЏ outdir
             natasha_report_path = Path(args.natasha_sync_report)
-            # Если путь уже содержит outdir в начале, убираем его
+            # Р•СЃР»Рё РїСѓС‚СЊ СѓР¶Рµ СЃРѕРґРµСЂР¶РёС‚ outdir РІ РЅР°С‡Р°Р»Рµ, СѓР±РёСЂР°РµРј РµРіРѕ
             natasha_report_str = str(natasha_report_path)
             outdir_str = str(outdir)
             if natasha_report_str.startswith(outdir_str):
-                # Убираем префикс outdir и ведущие слеши
+                # РЈР±РёСЂР°РµРј РїСЂРµС„РёРєСЃ outdir Рё РІРµРґСѓС‰РёРµ СЃР»РµС€Рё
                 relative_path = natasha_report_str[len(outdir_str):].lstrip('\\/')
                 natasha_report = outdir / relative_path if relative_path else outdir / natasha_report_path.name
             elif natasha_report_path.is_absolute():
@@ -553,7 +553,7 @@ def main():
             else:
                 natasha_report = outdir / natasha_report_path
             
-            # Создаем директорию для отчета, если её нет
+            # РЎРѕР·РґР°РµРј РґРёСЂРµРєС‚РѕСЂРёСЋ РґР»СЏ РѕС‚С‡РµС‚Р°, РµСЃР»Рё РµС‘ РЅРµС‚
             natasha_report.parent.mkdir(parents=True, exist_ok=True)
             
             natasha_sync_cmd = [
@@ -564,64 +564,64 @@ def main():
                 "--types", args.natasha_types,
                 "--report", str(natasha_report)
             ]
-            run_cmd(natasha_sync_cmd, "Natasha синхронизация именованных сущностей")
+            run_cmd(natasha_sync_cmd, "Natasha СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РёРјРµРЅРѕРІР°РЅРЅС‹С… СЃСѓС‰РЅРѕСЃС‚РµР№")
     
-    # Этап 9: Генерация EPUB (опционально)
+    # Р­С‚Р°Рї 9: Р“РµРЅРµСЂР°С†РёСЏ EPUB (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.epub_template:
-        print(f"  {step_num}. Генерация EPUB")
+        print(f"  {step_num}. Р“РµРЅРµСЂР°С†РёСЏ EPUB")
         
-        # Определяем лучший источник для EPUB (по приоритету из схемы)
-        # Приоритет: TXT (чистый обработанный текст) > JSON (структурированные данные) > HTML (может содержать лишнюю разметку)
+        # РћРїСЂРµРґРµР»СЏРµРј Р»СѓС‡С€РёР№ РёСЃС‚РѕС‡РЅРёРє РґР»СЏ EPUB (РїРѕ РїСЂРёРѕСЂРёС‚РµС‚Сѓ РёР· СЃС…РµРјС‹)
+        # РџСЂРёРѕСЂРёС‚РµС‚: TXT (С‡РёСЃС‚С‹Р№ РѕР±СЂР°Р±РѕС‚Р°РЅРЅС‹Р№ С‚РµРєСЃС‚) > JSON (СЃС‚СЂСѓРєС‚СѓСЂРёСЂРѕРІР°РЅРЅС‹Рµ РґР°РЅРЅС‹Рµ) > HTML (РјРѕР¶РµС‚ СЃРѕРґРµСЂР¶Р°С‚СЊ Р»РёС€РЅСЋСЋ СЂР°Р·РјРµС‚РєСѓ)
         epub_sources = [
-            outdir / "final_better.txt",  # После post-clean (если был)
-            outdir / "final_llm.txt",     # После LLM-коррекции (если была)
-            outdir / "final_clean.txt",   # После LanguageTool/YandexSpeller
-            outdir / "final_despaced.txt", # После десппейсинга (если был)
-            outdir / "final_wsplit.txt",   # После разбиения склеенных слов (если был)
-            outdir / "final_structured.json",  # Модернизированный JSON с ролями (стихи)
+            outdir / "final_better.txt",  # РџРѕСЃР»Рµ post-clean (РµСЃР»Рё Р±С‹Р»)
+            outdir / "final_llm.txt",     # РџРѕСЃР»Рµ LLM-РєРѕСЂСЂРµРєС†РёРё (РµСЃР»Рё Р±С‹Р»Р°)
+            outdir / "final_clean.txt",   # РџРѕСЃР»Рµ LanguageTool/YandexSpeller
+            outdir / "final_despaced.txt", # РџРѕСЃР»Рµ РґРµСЃРїРїРµР№СЃРёРЅРіР° (РµСЃР»Рё Р±С‹Р»)
+            outdir / "final_wsplit.txt",   # РџРѕСЃР»Рµ СЂР°Р·Р±РёРµРЅРёСЏ СЃРєР»РµРµРЅРЅС‹С… СЃР»РѕРІ (РµСЃР»Рё Р±С‹Р»)
+            outdir / "final_structured.json",  # РњРѕРґРµСЂРЅРёР·РёСЂРѕРІР°РЅРЅС‹Р№ JSON СЃ СЂРѕР»СЏРјРё (СЃС‚РёС…Рё)
             outdir / "final.txt",
             outdir / "structured_rules.json",
             outdir / "structured.json",
-            outdir / "final_better.html",  # После post-clean (если был)
+            outdir / "final_better.html",  # РџРѕСЃР»Рµ post-clean (РµСЃР»Рё Р±С‹Р»)
             outdir / "final_clean.html",
         ]
         
         epub_source = None
         for source in epub_sources:
             if source.exists():
-                # Проверяем, что файл не пустой
+                # РџСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ С„Р°Р№Р» РЅРµ РїСѓСЃС‚РѕР№
                 try:
                     is_valid = False
                     if source.suffix.lower() == ".txt":
-                        # Для TXT файлов проверяем, что есть достаточно текста (не только пробелы и не только цифры)
+                        # Р”Р»СЏ TXT С„Р°Р№Р»РѕРІ РїСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ РµСЃС‚СЊ РґРѕСЃС‚Р°С‚РѕС‡РЅРѕ С‚РµРєСЃС‚Р° (РЅРµ С‚РѕР»СЊРєРѕ РїСЂРѕР±РµР»С‹ Рё РЅРµ С‚РѕР»СЊРєРѕ С†РёС„СЂС‹)
                         content = source.read_text(encoding="utf-8").strip()
-                        # Проверяем, что есть текст и он не слишком короткий (минимум 50 символов)
-                        # И что это не только цифры/пробелы
+                        # РџСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ РµСЃС‚СЊ С‚РµРєСЃС‚ Рё РѕРЅ РЅРµ СЃР»РёС€РєРѕРј РєРѕСЂРѕС‚РєРёР№ (РјРёРЅРёРјСѓРј 50 СЃРёРјРІРѕР»РѕРІ)
+                        # Р С‡С‚Рѕ СЌС‚Рѕ РЅРµ С‚РѕР»СЊРєРѕ С†РёС„СЂС‹/РїСЂРѕР±РµР»С‹
                         if content and len(content) >= 50:
-                            # Проверяем, что есть буквы, а не только цифры
+                            # РџСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ РµСЃС‚СЊ Р±СѓРєРІС‹, Р° РЅРµ С‚РѕР»СЊРєРѕ С†РёС„СЂС‹
                             has_letters = any(c.isalpha() for c in content)
                             is_valid = has_letters
                         else:
                             is_valid = False
                     elif source.suffix.lower() == ".json":
-                        # Для JSON файлов проверяем, что есть блоки
+                        # Р”Р»СЏ JSON С„Р°Р№Р»РѕРІ РїСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ РµСЃС‚СЊ Р±Р»РѕРєРё
                         data = json.loads(source.read_text(encoding="utf-8"))
                         blocks = data.get("blocks", [])
                         is_valid = bool(blocks and any(b.get("text", "").strip() for b in blocks))
                     elif source.suffix.lower() in (".html", ".htm"):
-                        # Для HTML файлов проверяем, что есть контент (не только теги)
+                        # Р”Р»СЏ HTML С„Р°Р№Р»РѕРІ РїСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ РµСЃС‚СЊ РєРѕРЅС‚РµРЅС‚ (РЅРµ С‚РѕР»СЊРєРѕ С‚РµРіРё)
                         content = source.read_text(encoding="utf-8")
-                        # Убираем все теги и проверяем наличие текста
+                        # РЈР±РёСЂР°РµРј РІСЃРµ С‚РµРіРё Рё РїСЂРѕРІРµСЂСЏРµРј РЅР°Р»РёС‡РёРµ С‚РµРєСЃС‚Р°
                         text_only = re.sub(r'<[^>]+>', '', content).strip()
-                        # Если HTML содержит только простой текст в <pre> (без структуры),
-                        # лучше использовать TXT файл, который будет проверен позже
-                        # Проверяем, что это не просто <pre> с текстом
+                        # Р•СЃР»Рё HTML СЃРѕРґРµСЂР¶РёС‚ С‚РѕР»СЊРєРѕ РїСЂРѕСЃС‚РѕР№ С‚РµРєСЃС‚ РІ <pre> (Р±РµР· СЃС‚СЂСѓРєС‚СѓСЂС‹),
+                        # Р»СѓС‡С€Рµ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ TXT С„Р°Р№Р», РєРѕС‚РѕСЂС‹Р№ Р±СѓРґРµС‚ РїСЂРѕРІРµСЂРµРЅ РїРѕР·Р¶Рµ
+                        # РџСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ СЌС‚Рѕ РЅРµ РїСЂРѕСЃС‚Рѕ <pre> СЃ С‚РµРєСЃС‚РѕРј
                         if re.search(r'<pre[^>]*>', content, re.IGNORECASE):
-                            # Если есть <pre>, проверяем, есть ли другие структурированные элементы
+                            # Р•СЃР»Рё РµСЃС‚СЊ <pre>, РїСЂРѕРІРµСЂСЏРµРј, РµСЃС‚СЊ Р»Рё РґСЂСѓРіРёРµ СЃС‚СЂСѓРєС‚СѓСЂРёСЂРѕРІР°РЅРЅС‹Рµ СЌР»РµРјРµРЅС‚С‹
                             has_structure = bool(re.search(r'<(h[1-6]|p|div|section|article|header|footer)[^>]*>', content, re.IGNORECASE))
-                            # Если нет структуры, лучше пропустить этот HTML в пользу TXT
+                            # Р•СЃР»Рё РЅРµС‚ СЃС‚СЂСѓРєС‚СѓСЂС‹, Р»СѓС‡С€Рµ РїСЂРѕРїСѓСЃС‚РёС‚СЊ СЌС‚РѕС‚ HTML РІ РїРѕР»СЊР·Сѓ TXT
                             if not has_structure:
-                                is_valid = False  # Пропускаем простой HTML в пользу TXT
+                                is_valid = False  # РџСЂРѕРїСѓСЃРєР°РµРј РїСЂРѕСЃС‚РѕР№ HTML РІ РїРѕР»СЊР·Сѓ TXT
                             else:
                                 is_valid = bool(text_only)
                         else:
@@ -631,52 +631,52 @@ def main():
                         epub_source = source
                         break
                     else:
-                        # Определяем причину, почему файл был пропущен
-                        reason = "пустой"
+                        # РћРїСЂРµРґРµР»СЏРµРј РїСЂРёС‡РёРЅСѓ, РїРѕС‡РµРјСѓ С„Р°Р№Р» Р±С‹Р» РїСЂРѕРїСѓС‰РµРЅ
+                        reason = "РїСѓСЃС‚РѕР№"
                         if source.suffix.lower() == ".txt":
                             try:
                                 content = source.read_text(encoding="utf-8").strip()
                                 if not content:
-                                    reason = "пустой"
+                                    reason = "РїСѓСЃС‚РѕР№"
                                 elif len(content) < 50:
-                                    reason = f"слишком короткий ({len(content)} символов)"
+                                    reason = f"СЃР»РёС€РєРѕРј РєРѕСЂРѕС‚РєРёР№ ({len(content)} СЃРёРјРІРѕР»РѕРІ)"
                                 elif not any(c.isalpha() for c in content):
-                                    reason = "содержит только цифры/символы"
+                                    reason = "СЃРѕРґРµСЂР¶РёС‚ С‚РѕР»СЊРєРѕ С†РёС„СЂС‹/СЃРёРјРІРѕР»С‹"
                             except:
-                                reason = "ошибка чтения"
-                        print(f"⚠️  Файл {source.name} существует, но {reason} - пропускаем")
+                                reason = "РѕС€РёР±РєР° С‡С‚РµРЅРёСЏ"
+                        print(f"вљ пёЏ  Р¤Р°Р№Р» {source.name} СЃСѓС‰РµСЃС‚РІСѓРµС‚, РЅРѕ {reason} - РїСЂРѕРїСѓСЃРєР°РµРј")
                 except Exception as e:
-                    print(f"⚠️  Предупреждение: ошибка при проверке {source.name}: {e}")
+                    print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: РѕС€РёР±РєР° РїСЂРё РїСЂРѕРІРµСЂРєРµ {source.name}: {e}")
                     continue
         
         if not epub_source:
-            print(f"⚠️  Предупреждение: не найден подходящий файл для генерации EPUB")
-            print(f"   Проверенные файлы: {', '.join(str(s.name) for s in epub_sources)}")
-            # Показываем статус каждого файла
+            print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: РЅРµ РЅР°Р№РґРµРЅ РїРѕРґС…РѕРґСЏС‰РёР№ С„Р°Р№Р» РґР»СЏ РіРµРЅРµСЂР°С†РёРё EPUB")
+            print(f"   РџСЂРѕРІРµСЂРµРЅРЅС‹Рµ С„Р°Р№Р»С‹: {', '.join(str(s.name) for s in epub_sources)}")
+            # РџРѕРєР°Р·С‹РІР°РµРј СЃС‚Р°С‚СѓСЃ РєР°Р¶РґРѕРіРѕ С„Р°Р№Р»Р°
             for source in epub_sources:
                 if source.exists():
                     try:
                         size = source.stat().st_size
-                        print(f"   - {source.name}: существует ({size} байт)")
+                        print(f"   - {source.name}: СЃСѓС‰РµСЃС‚РІСѓРµС‚ ({size} Р±Р°Р№С‚)")
                     except:
-                        print(f"   - {source.name}: существует (размер неизвестен)")
+                        print(f"   - {source.name}: СЃСѓС‰РµСЃС‚РІСѓРµС‚ (СЂР°Р·РјРµСЂ РЅРµРёР·РІРµСЃС‚РµРЅ)")
                 else:
-                    print(f"   - {source.name}: не найден")
+                    print(f"   - {source.name}: РЅРµ РЅР°Р№РґРµРЅ")
         else:
-            print(f"📄 Используется источник для EPUB: {epub_source.name}")
-            # Показываем краткую информацию о содержимом
+            print(f"рџ“„ РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РёСЃС‚РѕС‡РЅРёРє РґР»СЏ EPUB: {epub_source.name}")
+            # РџРѕРєР°Р·С‹РІР°РµРј РєСЂР°С‚РєСѓСЋ РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ СЃРѕРґРµСЂР¶РёРјРѕРј
             try:
                 if epub_source.suffix.lower() == ".json":
                     data = json.loads(epub_source.read_text(encoding="utf-8"))
                     blocks = data.get("blocks", [])
                     blocks_with_text = [b for b in blocks if b.get("text", "").strip()]
-                    print(f"   Содержит {len(blocks)} блоков, из них {len(blocks_with_text)} с текстом")
+                    print(f"   РЎРѕРґРµСЂР¶РёС‚ {len(blocks)} Р±Р»РѕРєРѕРІ, РёР· РЅРёС… {len(blocks_with_text)} СЃ С‚РµРєСЃС‚РѕРј")
                 elif epub_source.suffix.lower() == ".txt":
                     content = epub_source.read_text(encoding="utf-8")
                     lines = [l.strip() for l in content.splitlines() if l.strip()]
-                    print(f"   Содержит {len(lines)} непустых строк, размер: {len(content)} символов")
+                    print(f"   РЎРѕРґРµСЂР¶РёС‚ {len(lines)} РЅРµРїСѓСЃС‚С‹С… СЃС‚СЂРѕРє, СЂР°Р·РјРµСЂ: {len(content)} СЃРёРјРІРѕР»РѕРІ")
             except Exception as e:
-                print(f"   ⚠️  Не удалось проанализировать содержимое: {e}")
+                print(f"   вљ пёЏ  РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕР°РЅР°Р»РёР·РёСЂРѕРІР°С‚СЊ СЃРѕРґРµСЂР¶РёРјРѕРµ: {e}")
             template_epub = Path(args.epub_template)
             if not template_epub.is_absolute():
                 if (here / template_epub).exists():
@@ -685,9 +685,9 @@ def main():
                     template_epub = here / "sample.epub"
             
             if not template_epub.exists():
-                print(f"⚠️  Предупреждение: шаблон EPUB не найден: {template_epub}")
+                print(f"вљ пёЏ  РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ: С€Р°Р±Р»РѕРЅ EPUB РЅРµ РЅР°Р№РґРµРЅ: {template_epub}")
             else:
-                # Санитизируем имя файла для Windows (убираем недопустимые символы)
+                # РЎР°РЅРёС‚РёР·РёСЂСѓРµРј РёРјСЏ С„Р°Р№Р»Р° РґР»СЏ Windows (СѓР±РёСЂР°РµРј РЅРµРґРѕРїСѓСЃС‚РёРјС‹Рµ СЃРёРјРІРѕР»С‹)
                 safe_title = re.sub(r'[<>:"/\\|?*]', '_', args.title)
                 safe_title = safe_title.replace(' ', '_')
                 output_epub = outdir / f"{safe_title}.epub"
@@ -708,18 +708,18 @@ def main():
                 if args.epub_use_chapter_heads:
                     epub_cmd.append("--use-chapter-heads")
                 
-                if not run_cmd(epub_cmd, f"Этап 8: Генерация EPUB"):
+                if not run_cmd(epub_cmd, f"Р­С‚Р°Рї 8: Р“РµРЅРµСЂР°С†РёСЏ EPUB"):
                     return 1
                 
-                # Проверяем, создался ли EPUB
+                # РџСЂРѕРІРµСЂСЏРµРј, СЃРѕР·РґР°Р»СЃСЏ Р»Рё EPUB
                 if output_epub.exists():
                     print("\n" + "=" * 80)
-                    print("✅ EPUB УСПЕШНО СОЗДАН!")
+                    print("вњ… EPUB РЈРЎРџР•РЁРќРћ РЎРћР—Р”РђРќ!")
                     print("=" * 80)
-                    print(f"  📚 {output_epub}")
+                    print(f"  рџ“љ {output_epub}")
                     print("=" * 80)
     
-    # Удаляем промежуточные HTML если --html не указан
+    # РЈРґР°Р»СЏРµРј РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅС‹Рµ HTML РµСЃР»Рё --html РЅРµ СѓРєР°Р·Р°РЅ
     if not args.html:
         html_files = list(outdir.glob("*.html"))
         if html_files:
@@ -727,11 +727,11 @@ def main():
                 hf.unlink(missing_ok=True)
     
     print("\n" + "=" * 80)
-    print("✅ ОБРАБОТКА ЗАВЕРШЕНА")
+    print("вњ… РћР‘Р РђР‘РћРўРљРђ Р—РђР’Р•Р РЁР•РќРђ")
     print("=" * 80)
-    print(f"Результаты в папке: {outdir}")
+    print(f"Р РµР·СѓР»СЊС‚Р°С‚С‹ РІ РїР°РїРєРµ: {outdir}")
 
-    # Отчёт качества (опционально)
+    # РћС‚С‡С‘С‚ РєР°С‡РµСЃС‚РІР° (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
     if args.quality_report:
         try:
             rep_path = Path(args.quality_report)
@@ -763,7 +763,7 @@ def main():
                 txt = doubt_path.read_text(encoding="utf-8", errors="ignore")
                 doubts_count = len([l for l in txt.splitlines() if l.strip() and not l.strip().startswith("=")])
 
-            # Итоговые файлы
+            # РС‚РѕРіРѕРІС‹Рµ С„Р°Р№Р»С‹
             final_candidates = [
                 outdir / "final_better.txt",
                 outdir / "final_llm.txt",
@@ -774,13 +774,13 @@ def main():
             final_chars = final_path.stat().st_size if final_path else 0
 
             lines = []
-            lines.append(f"# OCR2EPUB — отчёт качества\n")
-            lines.append(f"- Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(f"# OCR2EPUB вЂ” РѕС‚С‡С‘С‚ РєР°С‡РµСЃС‚РІР°\n")
+            lines.append(f"- Р”Р°С‚Р°: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             lines.append(f"- PDF: `{args.pdf}`")
-            lines.append(f"- Профиль: `{args.profile or '—'}`")
-            lines.append(f"- Выход: `{outdir}`\n")
+            lines.append(f"- РџСЂРѕС„РёР»СЊ: `{args.profile or 'вЂ”'}`")
+            lines.append(f"- Р’С‹С…РѕРґ: `{outdir}`\n")
 
-            lines.append("## Использованные этапы")
+            lines.append("## РСЃРїРѕР»СЊР·РѕРІР°РЅРЅС‹Рµ СЌС‚Р°РїС‹")
             lines.append(f"- OCR engine: `{getattr(args, 'ocr_engine', 'auto')}`")
             lines.append(f"- LanguageTool: `{bool(args.lt_cloud)}`")
             lines.append(f"- Yandex.Speller: `{bool(args.yandex_speller)}`")
@@ -788,16 +788,16 @@ def main():
             lines.append(f"- Post-clean: `{bool(args.post_clean)}`")
             lines.append(f"- Natasha sync: `{bool(args.natasha_sync)}`\n")
 
-            lines.append("## Метрики")
+            lines.append("## РњРµС‚СЂРёРєРё")
             if epubcheck:
                 valid = epubcheck.get("valid", None)
                 status = epubcheck.get("status", "unknown")
                 errs = epubcheck.get("errors", 0)
                 warns = epubcheck.get("warnings", 0)
-                lines.append(f"- EPUBCheck: статус `{status}`, valid=`{valid}`, **{errs} ошибок**, **{warns} предупреждений**")
+                lines.append(f"- EPUBCheck: СЃС‚Р°С‚СѓСЃ `{status}`, valid=`{valid}`, **{errs} РѕС€РёР±РѕРє**, **{warns} РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№**")
                 msgs = epubcheck.get("messages") or []
                 if msgs and (errs or warns):
-                    lines.append("  - Примеры сообщений:")
+                    lines.append("  - РџСЂРёРјРµСЂС‹ СЃРѕРѕР±С‰РµРЅРёР№:")
                     for m in msgs[:8]:
                         lvl = m.get("level", "INFO")
                         msg = m.get("message", "")
@@ -805,44 +805,44 @@ def main():
                         loc_part = f" ({loc})" if loc else ""
                         lines.append(f"    - `{lvl}` {msg}{loc_part}")
             if lt_stats:
-                lines.append(f"- LT исправлений: **{lt_stats.get('applied_total', 0)}**")
-                lines.append(f"  - По чекерам: `{lt_stats.get('applied_by_checker', {})}`")
+                lines.append(f"- LT РёСЃРїСЂР°РІР»РµРЅРёР№: **{lt_stats.get('applied_total', 0)}**")
+                lines.append(f"  - РџРѕ С‡РµРєРµСЂР°Рј: `{lt_stats.get('applied_by_checker', {})}`")
             if llm_stats:
-                lines.append(f"- LLM чанков: **{llm_stats.get('chunks', llm_stats.get('chunks', 0))}**")
-                lines.append(f"- LLM токены: `{llm_stats.get('input_tokens', 0)} in + {llm_stats.get('output_tokens', 0)} out`")
-                lines.append(f"- LLM overlap: `{llm_stats.get('overlap_paragraphs', 0)} параграфов / {llm_stats.get('overlap_chars', 0)} символов`")
+                lines.append(f"- LLM С‡Р°РЅРєРѕРІ: **{llm_stats.get('chunks', llm_stats.get('chunks', 0))}**")
+                lines.append(f"- LLM С‚РѕРєРµРЅС‹: `{llm_stats.get('input_tokens', 0)} in + {llm_stats.get('output_tokens', 0)} out`")
+                lines.append(f"- LLM overlap: `{llm_stats.get('overlap_paragraphs', 0)} РїР°СЂР°РіСЂР°С„РѕРІ / {llm_stats.get('overlap_chars', 0)} СЃРёРјРІРѕР»РѕРІ`")
                 lines.append(f"- LLM book-memory: `{bool(llm_stats.get('book_memory'))}` (topk={llm_stats.get('memory_topk')})")
-                lines.append(f"- Сомнений (doubt_words): **{llm_stats.get('doubts_count', doubts_count)}**")
+                lines.append(f"- РЎРѕРјРЅРµРЅРёР№ (doubt_words): **{llm_stats.get('doubts_count', doubts_count)}**")
             else:
-                lines.append(f"- Сомнений (doubt_words): **{doubts_count}**")
+                lines.append(f"- РЎРѕРјРЅРµРЅРёР№ (doubt_words): **{doubts_count}**")
             if final_path:
-                lines.append(f"- Итоговый текст: `{final_path.name}` ({final_chars} байт)")
+                lines.append(f"- РС‚РѕРіРѕРІС‹Р№ С‚РµРєСЃС‚: `{final_path.name}` ({final_chars} Р±Р°Р№С‚)")
             lines.append("")
 
             if natasha_report.strip():
-                lines.append("## Natasha sync (выдержка)")
-                # Не раздуваем отчёт
+                lines.append("## Natasha sync (РІС‹РґРµСЂР¶РєР°)")
+                # РќРµ СЂР°Р·РґСѓРІР°РµРј РѕС‚С‡С‘С‚
                 nat_lines = natasha_report.strip().splitlines()
                 lines.extend(nat_lines[:50])
                 if len(nat_lines) > 50:
-                    lines.append("... (обрезано) ...")
+                    lines.append("... (РѕР±СЂРµР·Р°РЅРѕ) ...")
                 lines.append("")
 
-            lines.append("## Рекомендации")
-            lines.append("- Для прозы обычно лучше: `--llm-overlap-paragraphs 1` и `--llm-book-memory`.")
-            lines.append("- Если качество падает по мере текста: уменьшайте `--llm-chunk-size` до 4000–5500.")
-            lines.append("- Для контроля вёрстки: всегда проверяйте EPUB в 2–3 читалках + `epubcheck`.\n")
+            lines.append("## Р РµРєРѕРјРµРЅРґР°С†РёРё")
+            lines.append("- Р”Р»СЏ РїСЂРѕР·С‹ РѕР±С‹С‡РЅРѕ Р»СѓС‡С€Рµ: `--llm-overlap-paragraphs 1` Рё `--llm-book-memory`.")
+            lines.append("- Р•СЃР»Рё РєР°С‡РµСЃС‚РІРѕ РїР°РґР°РµС‚ РїРѕ РјРµСЂРµ С‚РµРєСЃС‚Р°: СѓРјРµРЅСЊС€Р°Р№С‚Рµ `--llm-chunk-size` РґРѕ 4000вЂ“5500.")
+            lines.append("- Р”Р»СЏ РєРѕРЅС‚СЂРѕР»СЏ РІС‘СЂСЃС‚РєРё: РІСЃРµРіРґР° РїСЂРѕРІРµСЂСЏР№С‚Рµ EPUB РІ 2вЂ“3 С‡РёС‚Р°Р»РєР°С… + `epubcheck`.\n")
 
             rep_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            print(f"📝 Отчёт качества сохранён: {rep_path}")
+            print(f"рџ“ќ РћС‚С‡С‘С‚ РєР°С‡РµСЃС‚РІР° СЃРѕС…СЂР°РЅС‘РЅ: {rep_path}")
         except Exception as exc:
-            print(f"⚠️  Не удалось создать quality-report: {exc}")
+            print(f"вљ пёЏ  РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ quality-report: {exc}")
     
-    # Показываем созданные файлы
+    # РџРѕРєР°Р·С‹РІР°РµРј СЃРѕР·РґР°РЅРЅС‹Рµ С„Р°Р№Р»С‹
     show_patterns = ["*.txt", "*.json", "*.epub"]
     if args.html:
         show_patterns.insert(1, "*.html")
-    print("\nСозданные файлы:")
+    print("\nРЎРѕР·РґР°РЅРЅС‹Рµ С„Р°Р№Р»С‹:")
     for pattern in show_patterns:
         files = list(outdir.glob(pattern))
         if files:
@@ -855,3 +855,4 @@ def main():
 
 if __name__ == '__main__':
     exit(main())
+
