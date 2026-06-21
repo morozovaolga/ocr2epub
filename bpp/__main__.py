@@ -17,7 +17,19 @@ from .export import export_workdir
 from .mech import apply_to_workdir
 from .pipeline import run_pages
 from .paths import default_corrector_root, package_root
-from .workdir import init_workdir, list_books, load_book, migrate_workdir, resolve_pdf, save_book, consolidate_workdir
+from .workdir import (
+    init_workdir,
+    list_books,
+    load_book,
+    migrate_workdir,
+    normalize_spelling,
+    resolve_mechanics,
+    resolve_target_orthography,
+    resolve_pdf,
+    save_book,
+    consolidate_workdir,
+    spelling_label,
+)
 
 
 def _default_out_root() -> Path:
@@ -36,10 +48,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
             "two_columns": args.two_columns,
             "engine": args.engine,
             "poetry": args.poetry,
+            "spelling": normalize_spelling(args.spelling),
         },
     )
     print(f"Workdir: {args.out.resolve()}")
     print(f"  book.json — title={book['title']!r}, pdf={book['pdf_path']!r}")
+    print(f"  орфография PDF: {spelling_label(book)}")
     if args.no_copy_pdf:
         print(
             "  ⚠ --no-copy-pdf: PDF вне workdir. Для одной папки используйте consolidate или init без этого флага.",
@@ -104,6 +118,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(str(e), file=sys.stderr)
             return 1
 
+    book = load_book(out_dir)
+    modernize, use_oldspelling = resolve_mechanics(
+        book,
+        no_modernize=args.no_modernize,
+        no_oldspelling=getattr(args, "no_oldspelling", False),
+    )
+
     result = run_pages(
         pdf_path,
         out_dir,
@@ -113,7 +134,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         force=args.force,
         apply_rules=not args.no_rules,
         rules_dir=Path(args.rules_dir) if args.rules_dir else None,
-        modernize=not args.no_modernize,
+        modernize=modernize,
+        use_oldspelling=use_oldspelling,
         two_columns=True if args.two_columns else None,
         poetry=True if args.poetry else None,
         engine=args.engine or None,
@@ -135,13 +157,19 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         page_to = args.page_to
     else:
         page_to = None
+    book = load_book(args.out)
+    modernize, use_oldspelling = resolve_mechanics(
+        book,
+        no_modernize=args.no_modernize,
+        no_oldspelling=args.no_oldspelling,
+    )
     result = apply_to_workdir(
         args.out,
         page_from=args.page_from,
         page_to=page_to,
         rules_dir=Path(args.rules_dir) if args.rules_dir else None,
-        modernize=not args.no_modernize,
-        use_oldspelling=not args.no_oldspelling,
+        modernize=modernize,
+        use_oldspelling=use_oldspelling,
     )
     print(f"Обновлено страниц: {result['pages_updated']}")
     if not args.no_assemble:
@@ -153,6 +181,11 @@ def _cmd_apply(args: argparse.Namespace) -> int:
 
 def _cmd_correct(args: argparse.Namespace) -> int:
     page_to = args.page_to if args.page_to > 0 else None
+    book = load_book(args.out)
+    target_orth = resolve_target_orthography(
+        book,
+        getattr(args, "target_orthography", None) or None,
+    )
     try:
         result = correct_workdir(
             args.out,
@@ -166,6 +199,7 @@ def _cmd_correct(args: argparse.Namespace) -> int:
             ollama_timeout=args.ollama_timeout,
             use_cloud=args.cloud,
             verbose=not args.quiet,
+            target_orthography=target_orth,
         )
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
@@ -230,8 +264,12 @@ def _cmd_review(args: argparse.Namespace) -> int:
         cmd.append("--no-browser")
     if args.no_ollama:
         cmd.append("--no-ollama")
+    book = load_book(args.out)
+    target_orth = resolve_target_orthography(book, args.target_orthography or None)
+    cmd.extend(["--target-orthography", target_orth])
     print(f"Review UI → {args.out.resolve()}")
     print(f"  source.pdf: {result['pdf']}")
+    print(f"  орфография review/LLM: {target_orth}")
     return subprocess.call(cmd, cwd=str(package_root()))
 
 
@@ -287,6 +325,12 @@ def main(argv: list[str] | None = None) -> int:
     init.add_argument("--two-columns", action="store_true")
     init.add_argument("--engine", default="pymupdf", choices=("pymupdf", "auto", "tesseract"))
     init.add_argument("--poetry", action="store_true")
+    init.add_argument(
+        "--spelling",
+        default="pre_reform",
+        choices=("pre_reform", "modern", "old"),
+        help="Орфография в PDF: pre_reform/old (дореформенная, по умол.) или modern (уже современная)",
+    )
     init.set_defaults(func=_cmd_init)
 
     mig = sub.add_parser("migrate", help="book.json для существующей папки (manifest + pages)")
@@ -307,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--force", action="store_true")
     run.add_argument("--no-rules", action="store_true")
     run.add_argument("--no-modernize", action="store_true")
+    run.add_argument("--no-oldspelling", action="store_true", help="Перекрывает spelling из book.json")
     run.add_argument("--no-assemble", action="store_true", help="Не собирать book_structured после run")
     run.add_argument("--two-columns", action="store_true")
     run.add_argument("--poetry", action="store_true")
@@ -367,6 +412,12 @@ def main(argv: list[str] | None = None) -> int:
     corr.add_argument("--no-assemble", action="store_true")
     corr.add_argument("--no-queue", action="store_true")
     corr.add_argument("--quiet", action="store_true", help="Без построчного прогресса")
+    corr.add_argument(
+        "--target-orthography",
+        choices=("modern", "faithful"),
+        default="",
+        help="Целевая орфография LLM (по умолчанию из book.json, иначе modern)",
+    )
     corr.set_defaults(func=_cmd_correct)
 
     exp = sub.add_parser("export", help="Финальный TXT из book_structured.json")
@@ -396,6 +447,12 @@ def main(argv: list[str] | None = None) -> int:
     rev.add_argument("--port", type=int, default=0, help="Порт (0 = 8765)")
     rev.add_argument("--no-browser", action="store_true")
     rev.add_argument("--no-ollama", action="store_true")
+    rev.add_argument(
+        "--target-orthography",
+        choices=("modern", "faithful"),
+        default="",
+        help="modern — современная орфография; faithful — сохранять дореформенное написание",
+    )
     rev.set_defaults(func=_cmd_review)
 
     sync = sub.add_parser(

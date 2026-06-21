@@ -44,6 +44,7 @@ def run_pages(
     apply_rules: bool = True,
     rules_dir: Optional[Path] = None,
     modernize: bool = True,
+    use_oldspelling: bool = True,
     two_columns: Optional[bool] = None,
     poetry: Optional[bool] = None,
     engine: Optional[str] = None,
@@ -103,6 +104,7 @@ def run_pages(
                 apply_rules=apply_rules,
                 rules_dir=rules_dir,
                 modernize=modernize,
+                use_oldspelling=use_oldspelling,
             )
             save_page(page_dir, data)
             mark_page_done(out_dir, page)

@@ -126,6 +126,7 @@ def correct_block(
     force: bool = False,
     review_only: bool = False,
     max_retries: int = 1,
+    target_orthography: str = "modern",
 ) -> Dict[str, Any]:
     cx = cx or _import_corrector()
     ours = (block.get("text_modern") or block.get("text") or "").strip()
@@ -175,7 +176,7 @@ def correct_block(
                 result = cx["suggest_correction"](
                     item,
                     our_text=ours,
-                    target_orthography="modern",
+                    target_orthography=target_orthography,
                     model=ollama_model,
                     base_url=ollama_url,
                     timeout=ollama_timeout,
@@ -247,6 +248,7 @@ def correct_workdir(
     ollama_timeout: float = 300,
     use_cloud: bool = False,
     verbose: bool = True,
+    target_orthography: str = "modern",
 ) -> Dict[str, Any]:
     cx = _import_corrector()
     st = cx["ollama_status"](ollama_url, ollama_model)
@@ -309,6 +311,7 @@ def correct_workdir(
                 rules_hint=hint,
                 force=force,
                 review_only=review_only,
+                target_orthography=target_orthography,
             )
             tag = b.get("status") or "?"
             changed = "+" if b.get("llm_changed") else "="

@@ -1,6 +1,6 @@
 # Book Page Pipeline v3
 
-Пайплайн для книг с **дореформенной орфографией в PDF**: OCR по блокам с `bbox` → механическая коррекция → LLM → ручная проверка → TXT для дальнейшей вёрстки.
+Пайплайн для книг **с текстовым слоем PDF** (дореформенная или современная русская орфография): OCR по блокам с `bbox` → механическая коррекция → LLM → ручная проверка → TXT для дальнейшей вёрстки.
 
 Одна книга = **одна папка** `out/<slug>/`. PDF, JSON, TXT, очередь corrector и логи — **только внутри неё**. В репозитории уже есть правила OCR, oldspelling, веб-review и CLI `bpp` — внешний `ocr2epub` не нужен.
 
@@ -62,6 +62,25 @@ PDF (текстовый слой / скан)
 
 ---
 
+## Орфография: два сценария
+
+При **`init`** один раз укажите, **как написан текст в PDF**. Дальше `apply`, `correct` и `review` подстроятся сами (флаги `--no-oldspelling` нужны только для переопределения).
+
+| PDF | Команда init | Что делает `apply` |
+|-----|--------------|-------------------|
+| **Дореформенный** (ятя, ъ, ѣ…) — по умолчанию | `bpp init --pdf … --out $BOOK` | OCR-правила + oldspelling → **современный** `text_modern` |
+| **Уже современный** | `bpp init --pdf … --out $BOOK --spelling modern` | Только OCR-правила, без лексикона старой орфографии |
+
+Review и LLM по умолчанию ориентированы на **современную** орфографию (`target_orthography: modern` в `book.json`).
+
+Если нужно **сохранять дореформенное написание** в правках и Ollama:
+
+```powershell
+python -m bpp review --out $BOOK --target-orthography faithful
+```
+
+---
+
 ## Установка
 
 ```powershell
@@ -93,11 +112,14 @@ ollama pull qwen2.5:3b
 ```powershell
 $BOOK = "out\kniga"   # любой slug
 
-# 1. Workdir + копия PDF
+# 1. Workdir + копия PDF (дореформенный PDF — без флагов; современный — см. таблицу выше)
 python -m bpp init `
   --pdf "D:\path\to\book.pdf" `
   --out $BOOK `
   --two-columns          # если две колонки на листе
+
+# Современная орфография в PDF:
+# python -m bpp init --pdf "..." --out $BOOK --spelling modern
 
 # 2. OCR (resume: пропускает готовые pages/)
 python -m bpp run --out $BOOK
@@ -118,7 +140,7 @@ python -m bpp review --out $BOOK
 python -m bpp export --out $BOOK --title "Название" --author "Автор"
 ```
 
-Тестовая книга **feb** уже лежит в `out/feb` (после `consolidate` PDF — `source.pdf` внутри папки).
+Тестовая книга **feb** уже лежит в `out/feb` (дореформенная орфография; после `consolidate` PDF — `source.pdf` внутри папки).
 
 **Старый способ** (если нужен отдельный запуск review без `bpp review`):
 
@@ -146,6 +168,14 @@ python -m pdf_faithful_corrector.web_app --workdir "D:\...\book_page_pipeline\ou
 | `export --out …` | `book_export.txt`, `footnotes.json` |
 
 ### Полезные флаги
+
+**`apply`**
+
+- настройки орфографии берутся из `book.json` (`flags.spelling`); перекрыть: `--no-oldspelling`, `--no-modernize`
+
+**`correct` / `review`**
+
+- `--target-orthography modern|faithful` — для LLM и review (по умолчанию `modern` из `book.json`)
 
 **`run`**
 
@@ -202,7 +232,7 @@ out/<slug>/
   "title": "feb",
   "pdf_path": "source.pdf",
   "pipeline_version": 3,
-  "flags": { "two_columns": true, "engine": "pymupdf", "poetry": false },
+  "flags": { "two_columns": true, "engine": "pymupdf", "poetry": false, "spelling": "pre_reform", "target_orthography": "modern" },
   "stages": {
     "init": "done",
     "ocr": "done",

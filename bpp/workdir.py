@@ -12,6 +12,11 @@ BOOK_JSON = "book.json"
 SOURCE_PDF = "source.pdf"
 PIPELINE_VERSION = 3
 
+SPELLING_PRE_REFORM = "pre_reform"
+SPELLING_MODERN = "modern"
+TARGET_ORTHOGRAPHY_MODERN = "modern"
+TARGET_ORTHOGRAPHY_FAITHFUL = "faithful"
+
 
 def _inside_workdir(path: Path, out_dir: Path) -> bool:
     try:
@@ -120,6 +125,8 @@ def default_book(title: str, pdf_path: str = SOURCE_PDF) -> Dict[str, Any]:
             "two_columns": False,
             "engine": "pymupdf",
             "poetry": False,
+            "spelling": SPELLING_PRE_REFORM,
+            "target_orthography": TARGET_ORTHOGRAPHY_MODERN,
         },
         "stages": {
             "init": "done",
@@ -265,3 +272,43 @@ def list_books(out_root: Path) -> List[Dict[str, Any]]:
             "pdf_path": book.get("pdf_path"),
         })
     return rows
+
+
+def normalize_spelling(value: str) -> str:
+    v = (value or "").strip().lower()
+    if v in ("modern", "m", "new", "современ"):
+        return SPELLING_MODERN
+    return SPELLING_PRE_REFORM
+
+
+def resolve_mechanics(
+    book: Optional[Dict[str, Any]],
+    *,
+    no_modernize: bool = False,
+    no_oldspelling: bool = False,
+) -> tuple[bool, bool]:
+    """(modernize, use_oldspelling). Явные CLI-флаги перекрывают book.json."""
+    if no_modernize or no_oldspelling:
+        return (not no_modernize, not no_oldspelling)
+    flags = (book or {}).get("flags") or {}
+    if flags.get("spelling") == SPELLING_MODERN:
+        return (True, False)
+    return (True, True)
+
+
+def resolve_target_orthography(
+    book: Optional[Dict[str, Any]],
+    cli: Optional[str] = None,
+) -> str:
+    if cli:
+        return cli
+    flags = (book or {}).get("flags") or {}
+    val = flags.get("target_orthography") or TARGET_ORTHOGRAPHY_MODERN
+    if val not in (TARGET_ORTHOGRAPHY_MODERN, TARGET_ORTHOGRAPHY_FAITHFUL):
+        return TARGET_ORTHOGRAPHY_MODERN
+    return val
+
+
+def spelling_label(book: Optional[Dict[str, Any]]) -> str:
+    flags = (book or {}).get("flags") or {}
+    return "современная" if flags.get("spelling") == SPELLING_MODERN else "дореформенная"
