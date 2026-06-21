@@ -1,0 +1,15 @@
+{"id": "R-SOL-000", "pattern": "HE БAБЬЯ ЗAБOTA", "replace": "НЕ БАБЬЯ ЗАБОТА", "status": "active", "notes": "sol-2-part: латиница в заголовке"}
+{"id": "R-SOL-000b", "pattern": "HE БАБЬЯ ЗАБОТА", "replace": "НЕ БАБЬЯ ЗАБОТА", "status": "active", "notes": "sol-2-part"}
+{"id": "R-SOL-001", "pattern": "нна Ефимовна", "replace": "Анна Ефимовна", "status": "active", "notes": "sol-2-part: потеряна А"}
+{"id": "R-SOL-002", "pattern": "е Данилкой", "replace": "с Данилкой", "status": "active", "notes": "sol-2-part"}
+{"id": "R-SOL-003", "pattern": "е Иваном", "replace": "с Иваном", "status": "active", "notes": "sol-2-part"}
+{"id": "R-SOL-004", "pattern": "® обедне", "replace": "к обедне", "status": "active", "notes": "sol-2-part symbol"}
+{"id": "R-SOL-005", "pattern": "©\\s*", "replace": "с ", "status": "active", "notes": "sol-2-part © -> с"}
+{"id": "R-SOL-005b", "pattern": "ссобор", "replace": "собор", "status": "active", "notes": "sol-2-part"}
+{"id": "R-SOL-006", "pattern": "& ней", "replace": "у ней", "status": "active", "notes": "sol-2-part"}
+{"id": "R-SOL-007", "pattern": "Не приучен емолоду", "replace": "Не приучен с молоду", "status": "active", "notes": "sol-2-part"}
+{"id": "R-SOL-008", "pattern": "Ла полно", "replace": "Да полно", "status": "active", "notes": "sol-2-part"}
+{"id": "R-SOL-009", "pattern": "\\s+\\d{2,3}\\s+\\d\\s+", "replace": " ", "status": "active", "notes": "sol-2-part: номера страниц OCR"}
+{"id": "R-SOL-010", "pattern": "(?m)^\\s*[8G]\\\\?\\s*ч\\s*$", "replace": "", "status": "active", "notes": "sol-2-part: мусорная строка"}
+{"id": "R-SOL-011", "pattern": "\\bI Почестью", "replace": "1 Почестью", "status": "active", "notes": "sol-2-part: сноска I→1"}
+

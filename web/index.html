@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF Faithful Corrector</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>PDF Faithful Corrector</h1>
+      <p class="subtitle">Сверка с PDF: страница + правка современного текста</p>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="top-actions">
+      <button type="button" class="btn ghost" id="btn-rebuild" title="Пересобрать corrector_queue.json">↻ Пересобрать</button>
+      <button type="button" class="btn primary" id="btn-apply" title="Сохранить, выучить правила, пересобрать очередь">💾 Применить</button>
+    </div>
+  </header>
+
+  <nav class="filters" id="filters">
+    <button type="button" class="chip active" data-filter="review">На проверку</button>
+    <button type="button" class="chip" data-filter="no_pdf_text">Нет PDF-текста</button>
+    <button type="button" class="chip" data-filter="ok">OK</button>
+    <button type="button" class="chip" data-filter="pending">Без решения</button>
+    <button type="button" class="chip" data-filter="all">Все</button>
+  </nav>
+
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="list-header">
+        <span id="list-title">Страницы</span>
+        <span class="nav-counter" id="nav-counter">—</span>
+      </div>
+      <ol class="item-list" id="item-list"></ol>
+    </aside>
+
+    <section class="review-panel" id="review-panel">
+      <div class="empty-state" id="empty-state">
+        <p>Загрузка очереди…</p>
+      </div>
+
+      <article class="review-card hidden" id="review-card">
+        <header class="card-header">
+          <div class="card-meta">
+            <span class="badge" id="status-badge">review</span>
+            <span id="para-label">Абзац #0</span>
+            <span class="muted" id="sim-label">sim 0.00</span>
+            <span class="muted" id="page-label">стр. —</span>
+          </div>
+          <div class="card-nav">
+            <div class="page-nav hidden" id="page-nav"></div>
+            <button type="button" class="btn ghost" id="btn-prev" title="← / K">←</button>
+            <button type="button" class="btn ghost" id="btn-next" title="→ / J">→</button>
+          </div>
+        </header>
+
+        <div class="compare-row">
+          <figure class="pdf-preview" id="pdf-preview">
+            <div class="compare-pane-body pdf-pane">
+              <img id="pdf-image" alt="Страница PDF" loading="lazy">
+            </div>
+            <figcaption id="pdf-caption">Страница PDF</figcaption>
+          </figure>
+
+          <div class="text-block ours-block" id="ours-block">
+            <h3>Наш текст <span class="hint-inline" id="slice-hint">фрагмент для этой страницы</span> <span class="hint-inline" id="spell-hint"></span> <span class="hint-inline muted">· красн. база · оранж. орф.</span></h3>
+            <div class="compare-pane-body text-pane">
+              <div class="text-editor-wrap">
+                <div class="ours-highlight" id="ours-highlight" aria-hidden="true"></div>
+                <textarea id="ours-edit" class="text-content ours" spellcheck="true"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <footer class="card-actions">
+          <button type="button" class="btn ghost" id="btn-ollama" title="2 / L">✨ Ollama</button>
+          <button type="button" class="btn success" id="btn-keep" title="1 / O">Оставить наш</button>
+          <button type="button" class="btn primary" id="btn-save-edit" title="Enter">Сохранить правку</button>
+          <button type="button" class="btn ghost" id="btn-skip" title="3 / S">Пропустить</button>
+        </footer>
+
+        <div class="ollama-panel hidden" id="ollama-panel">
+          <h3>Предложение Ollama <span class="hint-inline" id="ollama-meta"></span></h3>
+          <div class="ollama-suggestion" id="ollama-suggestion"></div>
+          <ul class="ollama-edits hidden" id="ollama-edits"></ul>
+          <div class="ollama-actions">
+            <button type="button" class="btn" id="btn-ollama-apply">Подставить в текст</button>
+            <button type="button" class="btn primary" id="btn-ollama-accept">Принять и далее</button>
+            <button type="button" class="btn ghost" id="btn-ollama-dismiss">Скрыть</button>
+          </div>
+        </div>
+
+        <p class="hint">
+          <kbd>J</kbd>/<kbd>→</kbd> вперёд · <kbd>K</kbd>/<kbd>←</kbd> назад ·
+          <kbd>1</kbd> оставить · <kbd>2</kbd> Ollama · <kbd>Enter</kbd> сохранить ·
+          <strong>Применить</strong> — записать файл, выучить правила, пересобрать очередь
+        </p>
+      </article>
+    </section>
+  </main>
+
+  <footer class="statusbar" id="statusbar">Готово</footer>
+  <script src="app.js"></script>
+</body>
+</html>
