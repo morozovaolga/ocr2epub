@@ -20,3 +20,6 @@ out/
 # Бэкапы
 *.bak
 *.bak-*
+
+# Локальные заметки (не на GitHub)
+docs/article-v3-pipeline.md
